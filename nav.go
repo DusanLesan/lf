@@ -1224,6 +1224,24 @@ func (nav *nav) toggle() {
 	nav.toggleSelection(curr.path)
 }
 
+func (nav *nav) setFilesSelection(args []string, handler func(path string)) error {
+	var errMsg error
+	dir := nav.currDir()
+	for _, path := range args {
+		path = replaceTilde(path)
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(dir.path, path)
+		}
+
+		if _, err := os.Lstat(path); !os.IsNotExist(err) {
+			handler(path)
+		} else {
+			errMsg = err
+		}
+	}
+	return errMsg
+}
+
 func (nav *nav) tagToggleSelection(path string, tag string) {
 	path = evalSymlinks(path)
 

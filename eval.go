@@ -1262,18 +1262,33 @@ func (e *callExpr) eval(app *app, args []string) {
 		if len(e.args) == 0 {
 			app.nav.toggle()
 		} else {
-			dir := app.nav.currDir()
-			for _, path := range e.args {
-				path = replaceTilde(path)
-				if !filepath.IsAbs(path) {
-					path = filepath.Join(dir.path, path)
-				}
-				if _, err := os.Lstat(path); !os.IsNotExist(err) {
-					app.nav.toggleSelection(path)
-				} else {
-					app.ui.echoerrf("toggle: %s", err)
-				}
+			if err := app.nav.setFilesSelection(e.args, app.nav.toggleSelection); err != nil {
+				app.ui.echoerrf("toggle: %s", err)
 			}
+		}
+	case "select-path":
+		if !app.nav.init || len(e.args) == 0 {
+			return
+		}
+		if err := app.nav.setFilesSelection(e.args, func(path string) {
+			if _, ok := app.nav.selections[path]; !ok {
+				app.nav.selections[path] = app.nav.selectionInd
+				app.nav.selectionInd++
+			}
+		}); err != nil {
+			app.ui.echoerrf("select-path: %s", err)
+		}
+	case "unselect-path":
+		if !app.nav.init || len(e.args) == 0 {
+			return
+		}
+		if err := app.nav.setFilesSelection(e.args, func(path string) {
+			delete(app.nav.selections, path)
+		}); err != nil {
+			app.ui.echoerrf("unselect-path: %s", err)
+		}
+		if len(app.nav.selections) == 0 {
+			app.nav.selectionInd = 0
 		}
 	case "tag-toggle":
 		if !app.nav.init {

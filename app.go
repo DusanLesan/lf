@@ -31,7 +31,8 @@ type app struct {
 	cmdHistoryBeg  int
 	cmdHistoryInd  int
 	menuCompActive bool
-	menuComps      []string
+	menuCompTmp    []string
+	menuComps      []compMatch
 	menuCompInd    int
 	selectionOut   []string
 	watch          *watch
@@ -115,7 +116,7 @@ func (app *app) readFile(path string) {
 	}
 }
 
-func loadFiles() (list []string, cp bool, err error) {
+func loadFiles() (clipboard clipboard, err error) {
 	files, err := os.Open(gFilesPath)
 	if os.IsNotExist(err) {
 		err = nil
@@ -133,16 +134,16 @@ func loadFiles() (list []string, cp bool, err error) {
 
 	switch s.Text() {
 	case "copy":
-		cp = true
+		clipboard.mode = clipboardCopy
 	case "move":
-		cp = false
+		clipboard.mode = clipboardCut
 	default:
 		err = fmt.Errorf("unexpected option to copy file(s): %s", s.Text())
 		return
 	}
 
 	for s.Scan() && s.Text() != "" {
-		list = append(list, s.Text())
+		clipboard.paths = append(clipboard.paths, s.Text())
 	}
 
 	if s.Err() != nil {
@@ -150,12 +151,12 @@ func loadFiles() (list []string, cp bool, err error) {
 		return
 	}
 
-	log.Printf("loading files: %v", list)
+	log.Printf("loading files: %v", clipboard.paths)
 
 	return
 }
 
-func saveFiles(list []string, cp bool) error {
+func saveFiles(clipboard clipboard) error {
 	if err := os.MkdirAll(filepath.Dir(gFilesPath), os.ModePerm); err != nil {
 		return fmt.Errorf("creating data directory: %s", err)
 	}
@@ -166,16 +167,16 @@ func saveFiles(list []string, cp bool) error {
 	}
 	defer files.Close()
 
-	log.Printf("saving files: %v", list)
+	log.Printf("saving files: %v", clipboard.paths)
 
-	if cp {
+	if clipboard.mode == clipboardCopy {
 		fmt.Fprintln(files, "copy")
 	} else {
 		fmt.Fprintln(files, "move")
 	}
 
-	for _, f := range list {
-		fmt.Fprintln(files, f)
+	for _, path := range clipboard.paths {
+		fmt.Fprintln(files, path)
 	}
 
 	files.Sync()
@@ -317,7 +318,7 @@ func (app *app) loop() {
 	for {
 		select {
 		case <-app.quitChan:
-			if app.nav.copyTotal > 0 {
+			if app.nav.copyJobs > 0 {
 				app.ui.echoerr("quit: copy operation in progress")
 				continue
 			}
@@ -339,6 +340,9 @@ func (app *app) loop() {
 			log.Print("bye!")
 
 			return
+		case <-app.nav.copyJobsChan:
+			app.nav.copyJobs += 1
+			app.ui.draw(app.nav)
 		case n := <-app.nav.copyBytesChan:
 			app.nav.copyBytes += n
 			// n is usually 32*1024B (default io.Copy() buffer) so update roughly per 32KB x 128 = 4MB copied
@@ -350,6 +354,7 @@ func (app *app) loop() {
 			app.nav.copyTotal += n
 			if n < 0 {
 				app.nav.copyBytes += n
+				app.nav.copyJobs -= 1
 			}
 			if app.nav.copyTotal == 0 {
 				app.nav.copyUpdate = 0
@@ -392,12 +397,15 @@ func (app *app) loop() {
 					d.ind = prev.ind
 					d.pos = prev.pos
 					d.visualAnchor = min(prev.visualAnchor, len(d.files)-1)
+					d.visualWrap = prev.visualWrap
 					d.filter = prev.filter
 					d.sort()
 					d.sel(prev.name(), app.nav.height)
 				}
 
 				app.nav.dirCache[d.path] = d
+			} else {
+				d.sort()
 			}
 
 			var oldCurrPath string
@@ -427,7 +435,13 @@ func (app *app) loop() {
 			}
 
 			app.watchDir(d)
-			onLoad(app, d.fileNames())
+
+			paths := []string{}
+			for _, file := range d.allFiles {
+				paths = append(paths, file.path)
+			}
+			onLoad(app, paths)
+
 			app.ui.draw(app.nav)
 		case r := <-app.nav.regChan:
 			app.nav.regCache[r.path] = r
@@ -659,6 +673,45 @@ func (app *app) runShell(s string, args []string, prefix string) {
 			app.ui.exprChan <- &callExpr{"load", nil, 1}
 		}()
 	}
+}
+
+func (app *app) doComplete() (matches []compMatch) {
+	var result string
+
+	switch app.ui.cmdPrefix {
+	case ":":
+		matches, result = completeCmd(app.ui.cmdAccLeft)
+	case "$", "%", "!", "&":
+		matches, result = completeShell(app.ui.cmdAccLeft)
+	case "/", "?":
+		matches, result = completeSearch(app.ui.cmdAccLeft)
+	}
+
+	app.ui.cmdAccLeft = []rune(result)
+	app.ui.menu = listMatches(app.ui.screen, matches, -1)
+	return
+}
+
+func (app *app) menuComplete(direction int) {
+	if !app.menuCompActive {
+		app.menuCompTmp = tokenize(string(app.ui.cmdAccLeft))
+		app.menuComps = app.doComplete()
+		if len(app.menuComps) > 1 {
+			app.menuCompInd = -1
+			app.menuCompActive = true
+		}
+	} else {
+		app.menuCompInd += direction
+		if app.menuCompInd == len(app.menuComps) {
+			app.menuCompInd = 0
+		} else if app.menuCompInd < 0 {
+			app.menuCompInd = len(app.menuComps) - 1
+		}
+
+		app.menuCompTmp[len(app.menuCompTmp)-1] = app.menuComps[app.menuCompInd].result
+		app.ui.cmdAccLeft = []rune(strings.Join(app.menuCompTmp, " "))
+	}
+	app.ui.menu = listMatches(app.ui.screen, app.menuComps, app.menuCompInd)
 }
 
 func (app *app) watchDir(dir *dir) {

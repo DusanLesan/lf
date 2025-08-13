@@ -301,13 +301,13 @@ func fileInfo(f *file, d *dir, userWidth int, groupWidth int, customWidth int) (
 			if f.IsDir() && getDirCounts(d.path) {
 				switch {
 				case f.dirCount < -1:
-					info.WriteString("    !")
+					info.WriteString("     !")
 				case f.dirCount < 0:
-					info.WriteString("    ?")
-				case f.dirCount < 1000:
-					fmt.Fprintf(&info, " %4d", f.dirCount)
+					info.WriteString("     ?")
+				case f.dirCount < 10000:
+					fmt.Fprintf(&info, " %5d", f.dirCount)
 				default:
-					info.WriteString(" 999+")
+					info.WriteString(" 9999+")
 				}
 				continue
 			}
@@ -316,13 +316,15 @@ func fileInfo(f *file, d *dir, userWidth int, groupWidth int, customWidth int) (
 			if f.IsDir() && f.dirSize < 0 {
 				sz = "-"
 			} else {
-				sz = humanize(f.TotalSize())
+				sz = humanize(uint64(f.TotalSize()))
 			}
-			fmt.Fprintf(&info, " %4s", sz)
+			fmt.Fprintf(&info, " %5s", sz)
 		case "time":
 			fmt.Fprintf(&info, " %*s", max(len(gOpts.infotimefmtnew), len(gOpts.infotimefmtold)), infotimefmt(f.ModTime()))
 		case "atime":
 			fmt.Fprintf(&info, " %*s", max(len(gOpts.infotimefmtnew), len(gOpts.infotimefmtold)), infotimefmt(f.accessTime))
+		case "btime":
+			fmt.Fprintf(&info, " %*s", max(len(gOpts.infotimefmtnew), len(gOpts.infotimefmtold)), infotimefmt(f.birthTime))
 		case "ctime":
 			fmt.Fprintf(&info, " %*s", max(len(gOpts.infotimefmtnew), len(gOpts.infotimefmtold)), infotimefmt(f.changeTime))
 		case "perm":
@@ -347,7 +349,7 @@ func fileInfo(f *file, d *dir, userWidth int, groupWidth int, customWidth int) (
 
 type dirContext struct {
 	selections map[string]int
-	saves      map[string]bool
+	clipboard  clipboard
 	tags       map[string]string
 }
 
@@ -457,8 +459,8 @@ func (win *win) printDir(ui *ui, dir *dir, context *dirContext, dirStyle *dirSty
 			win.print(ui.screen, lnwidth, i, parseEscapeSequence(gOpts.visualfmt), " ")
 		} else if _, ok := context.selections[path]; ok {
 			win.print(ui.screen, lnwidth, i, parseEscapeSequence(gOpts.selectfmt), " ")
-		} else if cp, ok := context.saves[path]; ok {
-			if cp {
+		} else if slices.Contains(context.clipboard.paths, path) {
+			if context.clipboard.mode == clipboardCopy {
 				win.print(ui.screen, lnwidth, i, parseEscapeSequence(gOpts.copyfmt), " ")
 			} else {
 				win.print(ui.screen, lnwidth, i, parseEscapeSequence(gOpts.cutfmt), " ")
@@ -473,7 +475,7 @@ func (win *win) printDir(ui *ui, dir *dir, context *dirContext, dirStyle *dirSty
 		}
 
 		tag := " "
-		if val, ok := context.tags[evalSymlinks(path)]; ok && len(val) > 0 {
+		if val, ok := context.tags[path]; ok && len(val) > 0 {
 			tag = val
 		}
 
@@ -656,12 +658,12 @@ type ui struct {
 	cmdAccLeft  []rune
 	cmdAccRight []rune
 	cmdYankBuf  []rune
-	cmdTmp      []rune
 	keyAcc      []rune
 	keyCount    []rune
 	styles      styleMap
 	icons       iconMap
 	currentFile string
+	pasteEvent  bool
 }
 
 func newUI(screen tcell.Screen) *ui {
@@ -835,8 +837,8 @@ func (ui *ui) loadFileInfo(nav *nav) {
 	replace("%c", linkCount(curr))
 	replace("%u", userName(curr))
 	replace("%g", groupName(curr))
-	replace("%s", humanize(curr.Size()))
-	replace("%S", fmt.Sprintf("%4s", humanize(curr.Size())))
+	replace("%s", humanize(uint64(curr.Size())))
+	replace("%S", fmt.Sprintf("%5s", humanize(uint64(curr.Size()))))
 	replace("%t", curr.ModTime().Format(gOpts.timefmt))
 	replace("%l", curr.linkTarget)
 
@@ -950,12 +952,10 @@ func (ui *ui) drawRuler(nav *nav) {
 
 	copy := 0
 	move := 0
-	for _, cp := range nav.saves {
-		if cp {
-			copy++
-		} else {
-			move++
-		}
+	if nav.clipboard.mode == clipboardCopy {
+		copy = len(nav.clipboard.paths)
+	} else {
+		move = len(nav.clipboard.paths)
 	}
 
 	currSelections := nav.currSelections()
@@ -963,8 +963,12 @@ func (ui *ui) drawRuler(nav *nav) {
 
 	progress := []string{}
 
-	if nav.copyTotal > 0 {
-		progress = append(progress, fmt.Sprintf("[%d%%]", nav.copyBytes*100/nav.copyTotal))
+	if nav.copyJobs > 0 {
+		if nav.copyTotal == 0 {
+			progress = append(progress, fmt.Sprintf("[0%%]"))
+		} else {
+			progress = append(progress, fmt.Sprintf("[%d%%]", nav.copyBytes*100/nav.copyTotal))
+		}
 	}
 
 	if nav.moveTotal > 0 {
@@ -1077,7 +1081,7 @@ func (ui *ui) dirOfWin(nav *nav, wind int) *dir {
 
 func (ui *ui) draw(nav *nav) {
 	st := tcell.StyleDefault
-	context := dirContext{selections: nav.selections, saves: nav.saves, tags: nav.tags}
+	context := dirContext{selections: nav.selections, clipboard: nav.clipboard, tags: nav.tags}
 
 	ui.screen.Clear()
 
@@ -1396,6 +1400,10 @@ func (ui *ui) readNormalEvent(ev tcell.Event, nav *nav) expr {
 
 	switch tev := ev.(type) {
 	case *tcell.EventKey:
+		if ui.pasteEvent {
+			return nil
+		}
+
 		// KeyRune is a regular character
 		if tev.Key() == tcell.KeyRune {
 			switch {
@@ -1575,6 +1583,12 @@ func (ui *ui) readNormalEvent(ev tcell.Event, nav *nav) expr {
 		} else {
 			return &callExpr{"on-focus-lost", nil, 1}
 		}
+	case *tcell.EventPaste:
+		if tev.Start() {
+			ui.pasteEvent = true
+		} else if tev.End() {
+			ui.pasteEvent = false
+		}
 	}
 	return nil
 }
@@ -1655,7 +1669,7 @@ func anyKey() {
 	os.Stdin.Read(b)
 }
 
-func listMatches(screen tcell.Screen, matches []string, selectedInd int) string {
+func listMatches(screen tcell.Screen, matches []compMatch, selectedInd int) string {
 	mlen := len(matches)
 	if mlen < 2 {
 		return ""
@@ -1666,7 +1680,7 @@ func listMatches(screen tcell.Screen, matches []string, selectedInd int) string 
 	wtot, _ := screen.Size()
 	wcol := 0
 	for _, m := range matches {
-		wcol = max(wcol, len(m))
+		wcol = max(wcol, runeSliceWidth([]rune(m.name)))
 	}
 	wcol += gOpts.tabstop - wcol%gOpts.tabstop
 	ncol := max(wtot/wcol, 1)
@@ -1675,12 +1689,13 @@ func listMatches(screen tcell.Screen, matches []string, selectedInd int) string 
 
 	for i := 0; i < mlen; {
 		for j := 0; j < ncol && i < mlen; i, j = i+1, j+1 {
-			target := matches[i]
+			name := matches[i].name
+			w := runeSliceWidth([]rune(name))
 
-			if selectedInd == i {
-				fmt.Fprintf(&b, "\033[7m%s\033[0m%*s", target, wcol-len(target), "")
+			if i == selectedInd {
+				fmt.Fprintf(&b, "\033[7m%s\033[0m%*s", name, wcol-w, "")
 			} else {
-				fmt.Fprintf(&b, "%s%*s", target, wcol-len(target), "")
+				fmt.Fprintf(&b, "%s%*s", name, wcol-w, "")
 			}
 		}
 		b.WriteByte('\n')

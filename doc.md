@@ -57,13 +57,10 @@ The following commands are provided by lf:
 	middle                   (default 'M')
 	low                      (default 'L')
 	toggle
-	visual                   (default 'V')
 	invert                   (default 'v')
 	unselect                 (default 'u')
 	glob-select
 	glob-unselect
-	calcdirsize
-	clearmaps
 	copy                     (default 'y')
 	cut                      (default 'd')
 	paste                    (default 'p')
@@ -73,15 +70,8 @@ The following commands are provided by lf:
 	redraw                   (default '<c-l>')
 	load
 	reload                   (default '<c-r>')
-	echo
-	echomsg
-	echoerr
-	cd
-	select
 	delete         (modal)
 	rename         (modal)   (default 'r')
-	source
-	push
 	read           (modal)   (default ':')
 	shell          (modal)   (default '$')
 	shell-pipe     (modal)   (default '%')
@@ -102,8 +92,18 @@ The following commands are provided by lf:
 	mark-remove    (modal)   (default '"')
 	tag
 	tag-toggle               (default 't')
+	echo
+	echomsg
+	echoerr
+	cd
+	select
+	source
+	push
 	addcustominfo
+	calcdirsize
+	clearmaps
 	tty-write
+	visual                   (default 'V')
 
 The following Visual mode commands are provided by lf:
 
@@ -114,6 +114,7 @@ The following Visual mode commands are provided by lf:
 
 The following Command-line mode commands are provided by lf:
 
+	cmd-insert
 	cmd-escape               (default '<esc>')
 	cmd-complete             (default '<tab>')
 	cmd-menu-complete
@@ -163,9 +164,8 @@ The following options can be used to customize the behavior of lf:
 	dupfilefmt        string    (default '%f.~%n~')
 	errorfmt          string    (default "\033[7;31;47m")
 	filesep           string    (default "\n")
+	filtermethod      string    (default 'text')
 	findlen           int       (default 1)
-	globfilter        bool      (default false)
-	globsearch        bool      (default false)
 	hidden            bool      (default false)
 	hiddenfiles       []string  (default '.*' for Unix and '' for Windows)
 	history           bool      (default true)
@@ -193,6 +193,7 @@ The following options can be used to customize the behavior of lf:
 	roundbox          bool      (default false)
 	rulerfmt          string    (default "  %a|  %p|  \033[7;31m %m \033[0m|  \033[7;33m %c \033[0m|  \033[7;35m %s \033[0m|  \033[7;34m %f \033[0m|  %i/%t")
 	scrolloff         int       (default 0)
+	searchmethod      string    (default 'text')
 	selectfmt         string    (default "\033[7;35m")
 	selmode           string    (default 'all')
 	shell             string    (default 'sh' for Unix and 'cmd' for Windows)
@@ -235,6 +236,7 @@ The following environment variables are exported for shell commands:
 	lf
 	lf_{option}
 	lf_user_{option}
+	lf_flag_{flag}
 	lf_width
 	lf_height
 	lf_count
@@ -296,6 +298,7 @@ The following additional keybindings are provided by default:
 	map ss :set sortby size; set info size
 	map st :set sortby time; set info time
 	map sa :set sortby atime; set info atime
+	map sb :set sortby btime; set info btime
 	map sc :set sortby ctime; set info ctime
 	map se :set sortby ext; set info
 	map gh cd ~
@@ -318,19 +321,19 @@ Configuration files should be located at:
 
 	OS       system-wide               user-specific
 	Unix     /etc/lf/lfrc              ~/.config/lf/lfrc
-	Windows  C:\ProgramData\lf\lfrc    C:\Users\<user>\AppData\Local\lf\lfrc
+	Windows  C:\ProgramData\lf\lfrc    C:\Users\<user>\AppData\Roaming\lf\lfrc
 
 The colors file should be located at:
 
 	OS       system-wide               user-specific
 	Unix     /etc/lf/colors            ~/.config/lf/colors
-	Windows  C:\ProgramData\lf\colors  C:\Users\<user>\AppData\Local\lf\colors
+	Windows  C:\ProgramData\lf\colors  C:\Users\<user>\AppData\Roaming\lf\colors
 
 The icons file should be located at:
 
 	OS       system-wide               user-specific
 	Unix     /etc/lf/icons             ~/.config/lf/icons
-	Windows  C:\ProgramData\lf\icons   C:\Users\<user>\AppData\Local\lf\icons
+	Windows  C:\ProgramData\lf\icons   C:\Users\<user>\AppData\Roaming\lf\icons
 
 The selection file should be located at:
 
@@ -364,12 +367,11 @@ You can configure these locations with the following variables given with their 
 	    ~/.local/share
 
 	Windows
-	    %ProgramData%
-	    C:\ProgramData
-
 	    %LF_CONFIG_HOME%
+	    %APPDATA%
+
+	    %LF_DATA_HOME%
 	    %LOCALAPPDATA%
-	    C:\Users\<user>\AppData\Local
 
 A sample configuration file can be found at
 https://github.com/gokcehan/lf/blob/master/etc/lfrc.example
@@ -414,27 +416,6 @@ Move the current file selection to the high/middle/low of the screen.
 
 Toggle the selection of the current file or files given as arguments.
 
-## visual (default `V`)
-
-Switch to Visual mode.
-If already in Visual mode, discard the visual selection and stay in Visual mode.
-
-## visual-accept (default `V`)
-
-Add the visual selection to the selection list, quit Visual mode and return to Normal mode.
-
-## visual-unselect
-
-Remove the visual selection from the selection list, quit Visual mode and return to Normal mode.
-
-## visual-discard (default `<esc>`)
-
-Discard the visual selection, quit Visual mode and return to Normal mode.
-
-## visual-change (default `o`)
-
-Go to the other end of the current Visual mode selection.
-
 ## invert (default `v`)
 
 Reverse the selection of all files in the current directory (i.e. `toggle` all files).
@@ -449,34 +430,24 @@ Remove the selection of all files in all directories.
 
 Select/unselect files that match the given glob.
 
-## calcdirsize
-
-Calculate the total size for each of the selected directories.
-Option `info` should include `size` and option `dircounts` should be disabled to show this size.
-If the total size of a directory is not calculated, it will be shown as `-`.
-
-## clearmaps
-
-Remove all keybindings associated with the `map`, `nmap` and `vmap` command.
-This command can be used in the config file to remove the default keybindings.
-For safety purposes, `:` is left mapped to the `read` command, and `cmap` keybindings are retained so that it is still possible to exit `lf` using `:quit`.
-
 ## copy (default `y`)
 
-If there are no selections, save the path of the current file to the copy buffer, otherwise, copy the paths of selected files.
+Save the paths of selected files to the clipboard as files to be copied.
+If there are no selected files, the path of the current file is used instead.
 
 ## cut (default `d`)
 
-If there are no selections, save the path of the current file to the cut buffer, otherwise, copy the paths of selected files.
+Save the paths of selected files to the clipboard as files to be moved.
+If there are no selected files, the path of the current file is used instead.
 
 ## paste (default `p`)
 
-Copy/Move files in the copy/cut buffer to the current working directory.
+Copy/Move files in the clipboard to the current working directory.
 A custom `paste` command can be defined to override this default.
 
 ## clear (default `c`)
 
-Clear file paths in copy/cut buffer.
+Clear file paths in the clipboard.
 
 ## sync
 
@@ -501,26 +472,6 @@ This command is automatically called when required.
 
 Flush the cache and reload all files and directories.
 
-## echo
-
-Print the given arguments to the message line at the bottom.
-
-## echomsg
-
-Print the given arguments to the message line at the bottom and also to the log file.
-
-## echoerr
-
-Print given arguments to the message line at the bottom as `errorfmt` and also to the log file.
-
-## cd
-
-Change the working directory to the given argument.
-
-## select
-
-Change the current file selection to the given argument.
-
 ## delete (modal)
 
 Remove the current file or selected file(s).
@@ -530,14 +481,6 @@ A custom `delete` command can be defined to override this default.
 
 Rename the current file using the built-in method.
 A custom `rename` command can be defined to override this default.
-
-## source
-
-Read the configuration file given in the argument.
-
-## push
-
-Simulate key pushes given in the argument.
 
 ## read (modal) (default `:`)
 
@@ -595,11 +538,51 @@ You can define a new tag-clearing command by combining `tag` with `tag-toggle` (
 
 Tag a file with `*` or a single width character given in the argument if the file is untagged, otherwise remove the tag.
 
+## echo
+
+Print the given arguments to the message line at the bottom.
+
+## echomsg
+
+Print the given arguments to the message line at the bottom and also to the log file.
+
+## echoerr
+
+Print given arguments to the message line at the bottom as `errorfmt` and also to the log file.
+
+## cd
+
+Change the working directory to the given argument.
+
+## select
+
+Change the current file selection to the given argument.
+
+## source
+
+Read the configuration file given in the argument.
+
+## push
+
+Simulate key pushes given in the argument.
+
 ## addcustominfo
 
 Update the `custom` info field of the given file with the given string.
 The info string may contain ANSI escape codes to further customize its appearance.
 If no info is provided, clear the file's info instead.
+
+## calcdirsize
+
+Calculate the total size for each of the selected directories.
+Option `info` should include `size` and option `dircounts` should be disabled to show this size.
+If the total size of a directory is not calculated, it will be shown as `-`.
+
+## clearmaps
+
+Remove all keybindings associated with the `map`, `nmap` and `vmap` command.
+This command can be used in the config file to remove the default keybindings.
+For safety purposes, `:` is left mapped to the `read` command, and `cmap` keybindings are retained so that it is still possible to exit `lf` using `:quit`.
 
 ## tty-write
 
@@ -607,7 +590,30 @@ Write the given string to the tty.
 This is useful for sending escape sequences to the terminal to control its behavior (e.g. OSC 0 to set the window title).
 Using `tty-write` is preferred over directly writing to `/dev/tty` because the latter is not synchronized and can interfere with drawing the UI.
 
-# COMMAND LINE COMMANDS
+## visual (default `V`)
+
+Switch to Visual mode.
+If already in Visual mode, discard the visual selection and stay in Visual mode.
+
+# VISUAL MODE COMMANDS
+
+## visual-accept (default `V`)
+
+Add the visual selection to the selection list, quit Visual mode and return to Normal mode.
+
+## visual-unselect
+
+Remove the visual selection from the selection list, quit Visual mode and return to Normal mode.
+
+## visual-discard (default `<esc>`)
+
+Discard the visual selection, quit Visual mode and return to Normal mode.
+
+## visual-change (default `o`)
+
+Go to the other end of the current Visual mode selection.
+
+# COMMAND-LINE MODE COMMANDS
 
 The prompt character specifies which of the several Command-line modes you are in.
 For example, the `read` command takes you to the `:` mode.
@@ -617,6 +623,11 @@ You can go back with `cmd-delete-back` (`<backspace>` by default).
 
 The command line commands should be mostly compatible with readline keybindings.
 A character refers to a Unicode code point, a word consists of letters and digits, and a unix word consists of any non-blank characters.
+
+## cmd-insert
+
+Insert the character given in the argument.
+This command is automatically called when required.
 
 ## cmd-escape (default `<esc>`)
 
@@ -759,6 +770,7 @@ This option only has an effect when `info` has a `size` field and the pane is wi
 ## dirfirst (bool) (default true)
 
 Show directories first above regular files.
+With `dircounts` enabled, sorting by `size` always separates directories and files, regardless of `dirfirst`.
 
 ## dironly (bool) (default false)
 
@@ -788,20 +800,16 @@ For example, `\033[4m%s\033[0m` has the same effect as `\033[4m`.
 
 File separator used in environment variables `fs`, `fv` and `fx`.
 
+## filtermethod (string) (default `text`)
+
+How filter command patterns are treated.
+Currently supported methods are `text` (i.e. string literals), `glob` (i.e shell globs) and `regex` (i.e. regular expressions).
+See `SEARCHING FILES` for more details.
+
 ## findlen (int) (default 1)
 
 Number of characters prompted for the find command.
 When this value is set to 0, find command prompts until there is only a single match left.
-
-## globfilter (bool) (default false)
-
-Patterns are treated as globs for the filter command, see `globsearch` for more details.
-
-## globsearch (bool) (default false)
-
-When this option is enabled, search command patterns are considered as globs, otherwise, they are literals.
-With globbing, `*` matches any sequence, `?` matches any character, and `[...]` or `[^...]` matches character sets or ranges.
-Otherwise, these characters are interpreted as they are.
 
 ## hidden (bool) (default false)
 
@@ -841,18 +849,18 @@ Ignore case in sorting and search patterns.
 
 Ignore diacritics in sorting and search patterns.
 
-## incsearch (bool) (default false)
-
-Jump to the first match after each keystroke during searching.
-
 ## incfilter (bool) (default false)
 
 Apply filter pattern after each keystroke during filtering.
 
+## incsearch (bool) (default false)
+
+Jump to the first match after each keystroke during searching.
+
 ## info ([]string)  (default ``)
 
 A list of information that is shown for directory items at the right side of the pane.
-Currently supported information types are `size`, `time`, `atime`, `ctime`, `perm`, `user`, `group` and `custom`.
+Currently supported information types are `size`, `time`, `atime`, `btime`, `ctime`, `perm`, `user`, `group` and `custom`.
 The `custom` type is empty by default and can be updated using the `addcustominfo` command.
 Information is only shown when the pane width is more than twice the width of information.
 
@@ -894,7 +902,7 @@ Periodic checks are disabled when the value of this option is set to zero.
 ## preserve ([]string) (default `mode`)
 
 List of attributes that are preserved when copying files.
-Currently supported attributes are `mode` (i.a. access mode) and `timestamps` (i.e. modification time and access time).
+Currently supported attributes are `mode` (i.e. access mode) and `timestamps` (i.e. modification time and access time).
 Note that preserving other attributes like ownership of change/birth timestamp is desirable, but not portably supported in Go.
 
 ## preview (bool) (default true)
@@ -947,6 +955,18 @@ Additional expansions are provided for environment variables exported by lf, in 
 Expansions are also provided for user-defined options, in the form `%{lf_user_<name>}` (e.g. `%{lf_user_foo}`).
 The `|` character splits the format string into sections. Any section containing a failed expansion (result is a blank string) is discarded and not shown.
 
+## scrolloff (int) (default 0)
+
+Minimum number of offset lines shown at all times at the top and bottom of the screen when scrolling.
+The current line is kept in the middle when this option is set to a large value that is bigger than the half of number of lines.
+A smaller offset can be used when the current file is close to the beginning or end of the list to show the maximum number of items.
+
+## searchmethod (string) default `text`)
+
+How search command patterns are treated.
+Currently supported methods are `text` (i.e. string literals), `glob` (i.e shell globs) and `regex` (i.e. regular expressions).
+See `SEARCHING FILES` for more details.
+
 ## selectfmt (string) (default `\033[7;35m`)
 
 Format string of the indicator for files that are selected.
@@ -956,12 +976,6 @@ Format string of the indicator for files that are selected.
 Selection mode for commands.
 When set to `all` it will use the selected files from all directories.
 When set to `dir` it will only use the selected files in the current directory.
-
-## scrolloff (int) (default 0)
-
-Minimum number of offset lines shown at all times at the top and bottom of the screen when scrolling.
-The current line is kept in the middle when this option is set to a large value that is bigger than the half of number of lines.
-A smaller offset can be used when the current file is close to the beginning or end of the list to show the maximum number of items.
 
 ## shell (string) (default `sh` for Unix and `cmd` for Windows)
 
@@ -997,13 +1011,28 @@ This option has no effect when `ignoredia` is disabled.
 ## sortby (string) (default `natural`)
 
 Sort type for directories.
-Currently supported sort types are `natural`, `name`, `size`, `time`, `ctime`, `atime`, `ext` and `custom`.
+Currently supported sort types are `natural`, `name`, `size`, `time`, `atime`, `btime`, `ctime`, `ext` and `custom`.
+
+Meaning of each sort type:
+
+	natural   file name (track_2.flac comes before track_10.flac)
+	name      file name (track_10.flac comes before track_2.flac)
+	size      file size
+	time      time of last data modification
+	atime     time of last access
+	btime     time of file birth
+	ctime     time of last status (inode) change
+	ext       file extension
+	custom    property defined via `addcustominfo`
 
 ## statfmt (string) (default `\033[36m%p\033[0m| %c| %u| %g| %S| %t| -> %l`)
 
 Format string of the file info shown in the bottom left corner.
-Special expansions are provided, `%p` as the file permissions, `%c` as the link count, `%u` as the user, `%g` as the group, `%s` as the file size, `%S` as the file size but with a fixed width of four characters (left-padded with spaces), `%t` as the last modified time, `%l` as the link target, `%m` as the current mode and `%M` as the current mode but also shown in Normal mode (displaying `NORMAL` instead of a blank string).
+Special expansions are provided, `%p` as the file permissions, `%c` as the link count, `%u` as the user, `%g` as the group, `%s` as the file size, `%S` as the file size but with a fixed width of five characters (left-padded with spaces), `%t` as the last modified time, `%l` as the link target, `%m` as the current mode and `%M` as the current mode but also shown in Normal mode (displaying `NORMAL` instead of a blank string).
+
 The `|` character splits the format string into sections. Any section containing a failed expansion (result is a blank string) is discarded and not shown.
+
+File size is formatted using first letter of IEC 80000-13:2025 prefixes for binary multiples (i.e. 1024 bytes is `1.0K`).
 
 ## tabstop (int) (default 8)
 
@@ -1141,6 +1170,10 @@ Value of the {option}.
 
 Value of the user_{option}.
 
+## lf_flag_{flag}
+
+Value of the command line {flag}.
+
 ## lf_width, lf_height
 
 Width/Height of the terminal.
@@ -1249,7 +1282,7 @@ Command `set` is used to set an option which can be a boolean, integer, or strin
 	set sortby "time"  # string value with double quotes (backslash escapes)
 
 Command `setlocal` is used to set a local option for a directory which can be a boolean or string.
-Currently supported local options are `dircounts`, `dirfirst`, `dironly`, `hidden`, `info`, `reverse`, `sortby` and `locale`.
+Currently supported local options are `dircounts`, `dirfirst`, `dironly`, `hidden`, `info`, `locale`, `reverse` and `sortby`.
 Adding a trailing path separator (i.e. `/` for Unix and `\` for Windows) sets the option for the given directory along with its subdirectories:
 
 	setlocal /foo/bar hidden         # boolean enable
@@ -1288,9 +1321,9 @@ Command `cmap` is used to bind a key on the command line to a command line comma
 
 You can delete an existing binding by leaving the expression empty:
 
-	map gh             # deletes 'gh' mapping in normal and visual mode
-	nmap v             # deletes 'v' mapping in normal mode
-	vmap o             # deletes 'o' mapping in visual mode
+	map gh             # deletes 'gh' mapping in Normal and Visual mode
+	nmap v             # deletes 'v' mapping in Normal mode
+	vmap o             # deletes 'o' mapping in Visual mode
 	cmap <c-g>         # deletes '<c-g>' mapping
 
 Command `cmd` is used to define a custom command:
@@ -1616,8 +1649,10 @@ Searching is the traditional method to move the selection to a file matching a g
 Finding is an alternative way to search for a pattern possibly using fewer keystrokes.
 
 The searching mechanism is implemented with commands `search` (default `/`), `search-back` (default `?`), `search-next` (default `n`), and `search-prev` (default `N`).
-You can enable `globsearch` option to match with a glob pattern.
+You can set `searchmethod` to `glob` to match using a glob pattern.
 Globbing supports `*` to match any sequence, `?` to match any character, and `[...]` or `[^...]` to match character sets or ranges.
+You can set `searchmethod` to `regex` to match using a regex pattern.
+For a full overview of Go's RE2 syntax, see https://pkg.go.dev/regexp/syntax.
 You can enable `incsearch` option to jump to the current match at each keystroke while typing.
 In this mode, you can either use `cmd-enter` to accept the search or use `cmd-escape` to cancel the search.
 You can also map some other commands with `cmap` to accept the search and execute the command immediately afterwards.

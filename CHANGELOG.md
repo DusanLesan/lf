@@ -8,6 +8,80 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `Added`
 - `Fixed`
 
+## r37 (Unreleased)
+
+### Changed
+
+- The default paths of files read by `lf` is changed on Windows, to separate configuration files from data files (#2051).
+  - Configuration files (`lfrc`/`colors`/`icons`) are now stored in `%APPDATA%`, which can be overridden by `%LF_CONFIG_HOME%`.
+  - Data files (`files`/`marks`/`tags`/`history`) are now stored in `%LOCALAPPDATA%`, which can be overridden by `%LF_DATA_HOME%`.
+- The change for following symbolic links when tagging files from the previous release has been reverted (#2055). The previous change made it impossible to tag symbolic links separately from their targets, and also caused `lf` to run slowly in some cases.
+- The existing `globfilter` and `globsearch` options are now deprecated in favor of the new `filtermethod` and `searchmethod` options, which support regex patterns (#2058).
+  - `set globfilter true` should be replaced by `set filtermethod glob`.
+  - `set globsearch true` should be replaced by `set searchmethod glob`.
+- File sizes are now displayed using binary units (e.g. `1.0K` means 1024 bytes, not 1000 bytes) (#2062). The maximum width for displaying the file size has been increased from four to five characters.
+
+### Added
+
+- `dircounts` are now respected when sorting by size (#2025).
+- The `info` and `sortby` options now support `btime` (file creation time) (#2042). This depends on support for file creation times from the underlying system.
+- The selection in Visual mode now follows wrapping when `wrapscan`/`wrapscroll` is enabled (#2056).
+- Input pasted from the terminal is now ignored while in Normal mode (#2059). This prevents pasted content from being treated as keybindings, which can result in dangerous unintended behavior.
+- The Command-line mode completion now supports keywords for the `selmode` and `sortby` options (#2061), as well as the `info` and `preserve` options (#2071).
+- Command line flags are now exported as environment variables in the form `lf_flag_{flag}` (#2079).
+
+### Fixed
+
+- `dircounts` are now automatically populated after enabling it (#2049).
+- A bug where directories are unsorted after reloading when `dircache` is disabled is now fixed (#2050).
+- Filenames are now escaped when completing shell commands (#2071).
+- A bug where completion menu entries are misaligned when containing fullwidth characters is now fixed (#2071).
+- The `on-load` command now passes all files in the directory as arguments, not just files visible to the user (#2077).
+- Failure to move files across different filesystems is now shown as an error instead of a success in the UI (#2085).
+- Errors are now logged correctly when there are multiple errors during move/copy operations (#2089).
+- The progress for copy operations is now displayed immediately in the UI, even if it takes time to calculate the total size of files to be copied (#2093).
+
+## [r36](https://github.com/gokcehan/lf/releases/tag/r36)
+
+### Changed
+
+- Tagging symbolic links now affects the target instead of the symbolic link itself. This mimics the behavior in `ranger` (#1997).
+- The experimental command `invert-below` has been removed in favor of the newly added support for Visual mode (#2021).
+
+### Added
+
+- A new placeholder `%P` representing the scroll percentage is added to the `rulerfmt` option (#1985).
+- A new `on-load` hook command is added, which is triggered when files in a directory are loaded in `lf` (#2010).
+- The `info` option now supports `custom`, allowing users to display custom information for each file (#2012). The custom information should be added by the user via the `addcustominfo` command. Sorting by the custom information is also supported (#2019).
+- Support for `visual-mode` has now been added (#2021) (#2035). This includes the following changes:
+  - A new command `visual` (default `V`) can be used to enter Visual mode.
+  - A new command `visual-change` (default `o` in Visual mode) can be used to swap the positions of the cursor and anchor (start of the visual selection).
+  - A new command `visual-accept` (default `V` in Visual mode) can be used to exit Visual mode, adding the visual selection to the selection list.
+  - A new command `visual-discard` (default `<esc>` in Visual mode) can be used to exit Visual mode, without adding the visual selection to the selection list.
+  - A new command `visual-unselect` can be used to exit Visual mode, removing the visual selection from the selection list.
+  - The existing `map` command now adds keybindings for both Normal and Visual modes. Two new commands `nmap` and `vmap` are added which can be used to add keybindings for only Normal or Visual mode respectively.
+  - Two new commands `nmaps` and `vmaps` are added to display the list of keybindings in Normal and Visual mode respectively. These, along with the existing `maps` and `cmaps` commands, now display an extra column indicating the mode for which the keybindings apply to.
+  - A new option `visualfmt` is added to customize the appearance of the visual selection.
+  - Two new placeholders `%m` and `%M` are added to `statfmt` to display the mode in the status line. Both will display `VISUAL` when in Visual mode, however in Normal mode `%m` will display as a blank string while `%M` will display `NORMAL`.
+  - A new placeholder `%v` is added to `rulerfmt` which displays the number of files in the Visual selection. This is included in the default setting for `rulerfmt`.
+  - The `lf_mode` environment variable will now be set to `visual` while in Visual mode.
+  - The environment variable `$fv` is now exported to shell commands, which lists the files in the visual selection.
+- A `CHANGELOG.md` file has been added to the repo (#2027). This will be updated to describe `Changed`, `Added` and `Fixed` functionality for each new release.
+
+### Fixed
+
+- Displaying sixel images now uses the screen locking API in Tcell, which reduces flickering in the UI (#1943).
+- The `cmd-history` command is now ignored outside of Normal or Command-line mode, to prevent accidentally escaping out of other modes (#1971).
+- A potential crash when using the `cmd-delete-word-back` command is fixed (#1976).
+- The `preserve` option now applies to directories in addition to files when copying. This includes preserving `timestamps` (#1979) and `mode` (#1981).
+- The `lfrc.ps1.example` example config file is updated to include PowerShell equivalents for the default commands and keybindings (#1989).
+- Quoting for the `lf` environment variable is fixed for PowerShell users (#1990).
+- `tempmarks` are no longer cleared after the `sync` command is called (#1996).
+- The file stat information is no longer displayed during the execution of a `shell-pipe` command even if the file is updated (#2002).
+- Directories are now reloaded properly if any component in the current path is renamed (#2005).
+- Write updates for the log file are now ignored when `watch` is enabled. This helps to reduce notification spam and potential of infinite loops (#2015).
+- Attempting to `cut`/`copy` files into a directory without execute permissions no longer causes `lf` to crash, and an error message will be displayed instead (#2024).
+
 ## [r35](https://github.com/gokcehan/lf/releases/tag/r35)
 
 ### Added

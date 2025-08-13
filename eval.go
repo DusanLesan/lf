@@ -68,6 +68,10 @@ func (e *setExpr) eval(app *app, args []string) {
 		err = applyBoolOpt(&gOpts.dircache, e)
 	case "dircounts", "nodircounts", "dircounts!":
 		err = applyBoolOpt(&gOpts.dircounts, e)
+		if err == nil {
+			app.nav.renew()
+			app.ui.loadFile(app, false)
+		}
 	case "dirfirst", "nodirfirst", "dirfirst!":
 		err = applyBoolOpt(&gOpts.dirfirst, e)
 		if err == nil {
@@ -94,16 +98,12 @@ func (e *setExpr) eval(app *app, args []string) {
 			}
 			app.ui.loadFile(app, true)
 		}
+	// DEPRECATED: remove after r37 is released
 	case "globfilter", "noglobfilter", "globfilter!":
-		err = applyBoolOpt(&gOpts.globfilter, e)
-		if err == nil {
-			app.nav.sort()
-			app.nav.position()
-			app.ui.sort()
-			app.ui.loadFile(app, true)
-		}
+		app.ui.echoerr("option 'globfilter' is deprecated, use 'filtermethod' instead")
+	// DEPRECATED: remove after r37 is released
 	case "globsearch", "noglobsearch", "globsearch!":
-		err = applyBoolOpt(&gOpts.globsearch, e)
+		app.ui.echoerr("option 'globsearch' is deprecated, use 'searchmethod' instead")
 	case "hidden", "nohidden", "hidden!":
 		err = applyBoolOpt(&gOpts.hidden, e)
 		if err == nil {
@@ -229,6 +229,18 @@ func (e *setExpr) eval(app *app, args []string) {
 		gOpts.errorfmt = e.val
 	case "filesep":
 		gOpts.filesep = e.val
+	case "filtermethod":
+		switch e.val {
+		case "text", "glob", "regex":
+			gOpts.filtermethod = searchMethod(e.val)
+		default:
+			app.ui.echoerr("filtermethod: value should either be 'text', 'glob' or 'regex")
+			return
+		}
+		app.nav.sort()
+		app.nav.position()
+		app.ui.sort()
+		app.ui.loadFile(app, true)
 	case "findlen":
 		n, err := strconv.Atoi(e.val)
 		if err != nil {
@@ -268,13 +280,17 @@ func (e *setExpr) eval(app *app, args []string) {
 		toks := strings.Split(e.val, ":")
 		for _, s := range toks {
 			switch s {
-			case "size", "time", "atime", "ctime", "perm", "user", "group", "custom":
+			case "size", "time", "atime", "btime", "ctime", "perm", "user", "group", "custom":
 			default:
-				app.ui.echoerr("info: should consist of 'size', 'time', 'atime', 'ctime', 'perm', 'user', 'group' or 'custom' separated with colon")
+				app.ui.echoerr("info: should consist of 'size', 'time', 'atime', 'btime', 'ctime', 'perm', 'user', 'group' or 'custom' separated with colon")
 				return
 			}
 		}
 		gOpts.info = toks
+	case "infotimefmtnew":
+		gOpts.infotimefmtnew = e.val
+	case "infotimefmtold":
+		gOpts.infotimefmtold = e.val
 	case "locale":
 		localeStr := e.val
 		if localeStr != localeStrDisable {
@@ -286,27 +302,6 @@ func (e *setExpr) eval(app *app, args []string) {
 		gOpts.locale = localeStr
 		app.nav.sort()
 		app.ui.sort()
-	case "rulerfmt":
-		gOpts.rulerfmt = e.val
-	case "preserve":
-		if e.val == "" {
-			gOpts.preserve = nil
-			return
-		}
-		toks := strings.Split(e.val, ":")
-		for _, s := range toks {
-			switch s {
-			case "mode", "timestamps":
-			default:
-				app.ui.echoerr("preserve: should consist of 'mode' or 'timestamps separated with colon")
-				return
-			}
-		}
-		gOpts.preserve = toks
-	case "infotimefmtnew":
-		gOpts.infotimefmtnew = e.val
-	case "infotimefmtold":
-		gOpts.infotimefmtold = e.val
 	case "numberfmt":
 		gOpts.numberfmt = e.val
 	case "period":
@@ -326,6 +321,21 @@ func (e *setExpr) eval(app *app, args []string) {
 			app.ticker.Stop()
 			app.ticker = time.NewTicker(time.Duration(gOpts.period) * time.Second)
 		}
+	case "preserve":
+		if e.val == "" {
+			gOpts.preserve = nil
+			return
+		}
+		toks := strings.Split(e.val, ":")
+		for _, s := range toks {
+			switch s {
+			case "mode", "timestamps":
+			default:
+				app.ui.echoerr("preserve: should consist of 'mode' or 'timestamps' separated with colon")
+				return
+			}
+		}
+		gOpts.preserve = toks
 	case "previewer":
 		gOpts.previewer = replaceTilde(e.val)
 	case "promptfmt":
@@ -355,6 +365,8 @@ func (e *setExpr) eval(app *app, args []string) {
 			clear(app.nav.regCache)
 		}
 		app.ui.loadFile(app, true)
+	case "rulerfmt":
+		gOpts.rulerfmt = e.val
 	case "scrolloff":
 		n, err := strconv.Atoi(e.val)
 		if err != nil {
@@ -366,6 +378,14 @@ func (e *setExpr) eval(app *app, args []string) {
 			return
 		}
 		gOpts.scrolloff = n
+	case "searchmethod":
+		switch e.val {
+		case "text", "glob", "regex":
+			gOpts.searchmethod = searchMethod(e.val)
+		default:
+			app.ui.echoerr("searchmethod: value should either be 'text', 'glob' or 'regex'")
+			return
+		}
 	case "selectfmt":
 		gOpts.selectfmt = e.val
 	case "selmode":
@@ -504,9 +524,9 @@ func (e *setLocalExpr) eval(app *app, args []string) {
 		toks := strings.Split(e.val, ":")
 		for _, s := range toks {
 			switch s {
-			case "size", "time", "atime", "ctime", "perm", "user", "group", "custom":
+			case "size", "time", "atime", "btime", "ctime", "perm", "user", "group", "custom":
 			default:
-				app.ui.echoerr("info: should consist of 'size', 'time', 'atime', 'ctime', 'perm', 'user', 'group' or 'custom' separated with colon")
+				app.ui.echoerr("info: should consist of 'size', 'time', 'atime', 'btime', 'ctime', 'perm', 'user', 'group' or 'custom' separated with colon")
 				return
 			}
 		}
@@ -681,54 +701,6 @@ func splitKeys(s string) (keys []string) {
 	return
 }
 
-func doComplete(app *app) (matches []string) {
-	switch app.ui.cmdPrefix {
-	case ":":
-		matches, app.ui.cmdAccLeft = completeCmd(app.ui.cmdAccLeft)
-	case "/", "?":
-		matches, app.ui.cmdAccLeft = completeFile(app.ui.cmdAccLeft)
-	case "$", "%", "!", "&":
-		matches, app.ui.cmdAccLeft = completeShell(app.ui.cmdAccLeft)
-	}
-	return
-}
-
-func menuComplete(app *app, dir int) {
-	if !app.menuCompActive {
-		toks := tokenize(string(app.ui.cmdAccLeft))
-		for i, tok := range toks {
-			toks[i] = replaceTilde(tok)
-		}
-		app.ui.cmdAccLeft = []rune(strings.Join(toks, " "))
-		app.ui.cmdTmp = app.ui.cmdAccLeft
-		app.menuComps = doComplete(app)
-		if len(app.menuComps) > 1 {
-			app.menuCompInd = -1
-			app.menuCompActive = true
-		}
-	} else {
-		app.menuCompInd += dir
-		if app.menuCompInd == len(app.menuComps) {
-			app.menuCompInd = 0
-		} else if app.menuCompInd < 0 {
-			app.menuCompInd = len(app.menuComps) - 1
-		}
-
-		comp := app.menuComps[app.menuCompInd]
-		toks := tokenize(string(app.ui.cmdTmp))
-		last := toks[len(toks)-1]
-
-		if app.ui.cmdPrefix != "/" && app.ui.cmdPrefix != "?" {
-			comp = escape(comp)
-			_, last = filepath.Split(last)
-		}
-
-		ind := len(app.ui.cmdTmp) - len([]rune(last))
-		app.ui.cmdAccLeft = append(app.ui.cmdTmp[:ind], []rune(comp)...)
-	}
-	app.ui.menu = listMatches(app.ui.screen, app.menuComps, app.menuCompInd)
-}
-
 func update(app *app) {
 	app.ui.menu = ""
 	app.menuCompActive = false
@@ -833,6 +805,7 @@ func normal(app *app) {
 func visual(app *app) {
 	dir := app.nav.currDir()
 	dir.visualAnchor = dir.ind
+	dir.visualWrap = 0
 
 	app.ui.loadFileInfo(app.nav)
 }
@@ -1050,6 +1023,8 @@ func (e *callExpr) eval(app *app, args []string) {
 	os.Setenv("lf_count", strconv.Itoa(e.count))
 
 	switch e.name {
+	case "quit":
+		app.quitChan <- struct{}{}
 	case "up":
 		if !app.nav.init {
 			return
@@ -1106,19 +1081,6 @@ func (e *callExpr) eval(app *app, args []string) {
 			app.ui.loadFile(app, true)
 			app.ui.loadFileInfo(app.nav)
 		}
-	case "tty-write":
-		if len(e.args) != 1 {
-			app.ui.echoerr("tty-write: requires an argument")
-			return
-		}
-
-		tty, ok := app.ui.screen.Tty()
-		if !ok {
-			log.Printf("tty-write: failed to get tty")
-			return
-		}
-
-		tty.Write([]byte(e.args[0]))
 	case "scroll-down":
 		if !app.nav.init {
 			return
@@ -1179,16 +1141,6 @@ func (e *callExpr) eval(app *app, args []string) {
 		if cmd, ok := gOpts.cmds["open"]; ok {
 			cmd.eval(app, e.args)
 		}
-	case "jump-prev":
-		resetIncCmd(app)
-		preChdir(app)
-		for range e.count {
-			app.nav.cdJumpListPrev()
-		}
-		app.ui.loadFile(app, true)
-		app.ui.loadFileInfo(app.nav)
-		restartIncCmd(app)
-		onChdir(app)
 	case "jump-next":
 		resetIncCmd(app)
 		preChdir(app)
@@ -1199,8 +1151,16 @@ func (e *callExpr) eval(app *app, args []string) {
 		app.ui.loadFileInfo(app.nav)
 		restartIncCmd(app)
 		onChdir(app)
-	case "quit":
-		app.quitChan <- struct{}{}
+	case "jump-prev":
+		resetIncCmd(app)
+		preChdir(app)
+		for range e.count {
+			app.nav.cdJumpListPrev()
+		}
+		app.ui.loadFile(app, true)
+		app.ui.loadFileInfo(app.nav)
+		restartIncCmd(app)
+		onChdir(app)
 	case "top":
 		if !app.nav.init {
 			return
@@ -1290,56 +1250,6 @@ func (e *callExpr) eval(app *app, args []string) {
 		if len(app.nav.selections) == 0 {
 			app.nav.selectionInd = 0
 		}
-	case "tag-toggle":
-		if !app.nav.init {
-			return
-		}
-
-		tag := "*"
-		if len(e.args) != 0 {
-			tag = e.args[0]
-		}
-
-		if err := app.nav.tagToggle(tag); err != nil {
-			app.ui.echoerrf("tag-toggle: %s", err)
-		} else if err := app.nav.writeTags(); err != nil {
-			app.ui.echoerrf("tag-toggle: %s", err)
-		}
-
-		if gSingleMode {
-			if err := app.nav.sync(); err != nil {
-				app.ui.echoerrf("tag-toggle: %s", err)
-			}
-		} else {
-			if err := remote("send sync"); err != nil {
-				app.ui.echoerrf("tag-toggle: %s", err)
-			}
-		}
-	case "tag":
-		if !app.nav.init {
-			return
-		}
-
-		tag := "*"
-		if len(e.args) != 0 {
-			tag = e.args[0]
-		}
-
-		if err := app.nav.tag(tag); err != nil {
-			app.ui.echoerrf("tag: %s", err)
-		} else if err := app.nav.writeTags(); err != nil {
-			app.ui.echoerrf("tag: %s", err)
-		}
-
-		if gSingleMode {
-			if err := app.nav.sync(); err != nil {
-				app.ui.echoerrf("tag: %s", err)
-			}
-		} else {
-			if err := remote("send sync"); err != nil {
-				app.ui.echoerrf("tag: %s", err)
-			}
-		}
 	case "invert":
 		if !app.nav.init {
 			return
@@ -1347,30 +1257,36 @@ func (e *callExpr) eval(app *app, args []string) {
 		app.nav.invert()
 	case "unselect":
 		app.nav.unselect()
-	case "calcdirsize":
+	case "glob-select":
 		if !app.nav.init {
 			return
 		}
-		err := app.nav.calcDirSize()
-		if err != nil {
-			app.ui.echoerrf("calcdirsize: %s", err)
+		if len(e.args) != 1 {
+			app.ui.echoerr("glob-select: requires a pattern to match")
 			return
 		}
-		app.ui.loadFileInfo(app.nav)
-		app.nav.sort()
-		app.ui.sort()
-	case "clearmaps":
-		// leave `:` and cmaps bound so the user can still exit using `:quit`
-		clear(gOpts.nkeys)
-		clear(gOpts.vkeys)
-		gOpts.nkeys[":"] = &callExpr{"read", nil, 1}
-		gOpts.vkeys[":"] = &callExpr{"read", nil, 1}
+		if err := app.nav.globSel(e.args[0], false); err != nil {
+			app.ui.echoerrf("%s", err)
+			return
+		}
+	case "glob-unselect":
+		if !app.nav.init {
+			return
+		}
+		if len(e.args) != 1 {
+			app.ui.echoerr("glob-unselect: requires a pattern to match")
+			return
+		}
+		if err := app.nav.globSel(e.args[0], true); err != nil {
+			app.ui.echoerrf("%s", err)
+			return
+		}
 	case "copy":
 		if !app.nav.init {
 			return
 		}
 
-		if err := app.nav.save(true); err != nil {
+		if err := app.nav.save(clipboardCopy); err != nil {
 			app.ui.echoerrf("copy: %s", err)
 			return
 		}
@@ -1392,7 +1308,7 @@ func (e *callExpr) eval(app *app, args []string) {
 			return
 		}
 
-		if err := app.nav.save(false); err != nil {
+		if err := app.nav.save(clipboardCut); err != nil {
 			app.ui.echoerrf("cut: %s", err)
 			return
 		}
@@ -1419,6 +1335,65 @@ func (e *callExpr) eval(app *app, args []string) {
 		} else if err := app.nav.paste(app); err != nil {
 			app.ui.echoerrf("paste: %s", err)
 			return
+		}
+		app.ui.loadFile(app, true)
+		app.ui.loadFileInfo(app.nav)
+	case "clear":
+		if !app.nav.init {
+			return
+		}
+		if err := saveFiles(clipboard{nil, clipboardCut}); err != nil {
+			app.ui.echoerrf("clear: %s", err)
+			return
+		}
+		if gSingleMode {
+			if err := app.nav.sync(); err != nil {
+				app.ui.echoerrf("clear: %s", err)
+				return
+			}
+		} else {
+			if err := remote("send sync"); err != nil {
+				app.ui.echoerrf("clear: %s", err)
+				return
+			}
+		}
+		app.ui.loadFileInfo(app.nav)
+	case "sync":
+		if err := app.nav.sync(); err != nil {
+			app.ui.echoerrf("sync: %s", err)
+		}
+	case "draw":
+	case "redraw":
+		if !app.nav.init {
+			return
+		}
+		app.ui.renew()
+		app.ui.screen.Sync()
+		if app.nav.height != app.ui.wins[0].h {
+			app.nav.height = app.ui.wins[0].h
+			clear(app.nav.regCache)
+		}
+		if gOpts.sixel {
+			clear(app.nav.regCache)
+			app.ui.sxScreen.forceClear = true
+		}
+		for _, dir := range app.nav.dirs {
+			dir.boundPos(app.nav.height)
+		}
+		app.ui.loadFile(app, true)
+		onRedraw(app)
+	case "load":
+		if !app.nav.init || gOpts.watch {
+			return
+		}
+		app.nav.renew()
+		app.ui.loadFile(app, false)
+	case "reload":
+		if !app.nav.init {
+			return
+		}
+		if err := app.nav.reload(); err != nil {
+			app.ui.echoerrf("reload: %s", err)
 		}
 		app.ui.loadFile(app, true)
 		app.ui.loadFileInfo(app.nav)
@@ -1457,60 +1432,41 @@ func (e *callExpr) eval(app *app, args []string) {
 			}
 		}
 		app.ui.loadFileInfo(app.nav)
-	case "clear":
+	case "rename":
 		if !app.nav.init {
 			return
 		}
-		if err := saveFiles(nil, false); err != nil {
-			app.ui.echoerrf("clear: %s", err)
-			return
-		}
-		if gSingleMode {
-			if err := app.nav.sync(); err != nil {
-				app.ui.echoerrf("clear: %s", err)
-				return
+		if cmd, ok := gOpts.cmds["rename"]; ok {
+			cmd.eval(app, e.args)
+			if gSingleMode {
+				app.nav.renew()
+				app.ui.loadFile(app, true)
+			} else {
+				if err := remote("send load"); err != nil {
+					app.ui.echoerrf("rename: %s", err)
+					return
+				}
 			}
 		} else {
-			if err := remote("send sync"); err != nil {
-				app.ui.echoerrf("clear: %s", err)
+			curr, err := app.nav.currFile()
+			if err != nil {
+				app.ui.echoerrf("rename: %s:", err)
 				return
 			}
+			if app.ui.cmdPrefix == ">" {
+				return
+			}
+			normal(app)
+			app.ui.cmdPrefix = "rename: "
+			extension := getFileExtension(curr)
+			if len(extension) == 0 {
+				// no extension or .hidden or is directory
+				app.ui.cmdAccLeft = append(app.ui.cmdAccLeft, []rune(curr.Name())...)
+			} else {
+				app.ui.cmdAccLeft = append(app.ui.cmdAccLeft, []rune(curr.Name()[:len(curr.Name())-len(extension)])...)
+				app.ui.cmdAccRight = append(app.ui.cmdAccRight, []rune(extension)...)
+			}
 		}
-		app.ui.loadFileInfo(app.nav)
-	case "draw":
-	case "redraw":
-		if !app.nav.init {
-			return
-		}
-		app.ui.renew()
-		app.ui.screen.Sync()
-		if app.nav.height != app.ui.wins[0].h {
-			app.nav.height = app.ui.wins[0].h
-			clear(app.nav.regCache)
-		}
-		if gOpts.sixel {
-			clear(app.nav.regCache)
-			app.ui.sxScreen.forceClear = true
-		}
-		for _, dir := range app.nav.dirs {
-			dir.boundPos(app.nav.height)
-		}
-		app.ui.loadFile(app, true)
-		onRedraw(app)
-	case "load":
-		if !app.nav.init || gOpts.watch {
-			return
-		}
-		app.nav.renew()
-		app.ui.loadFile(app, false)
-	case "reload":
-		if !app.nav.init {
-			return
-		}
-		if err := app.nav.reload(); err != nil {
-			app.ui.echoerrf("reload: %s", err)
-		}
-		app.ui.loadFile(app, true)
 		app.ui.loadFileInfo(app.nav)
 	case "read":
 		if app.ui.cmdPrefix == ">" {
@@ -1714,45 +1670,55 @@ func (e *callExpr) eval(app *app, args []string) {
 		normal(app)
 		app.ui.menu = listMarks(app.nav.marks)
 		app.ui.cmdPrefix = "mark-remove: "
-	case "rename":
+	case "tag":
 		if !app.nav.init {
 			return
 		}
-		if cmd, ok := gOpts.cmds["rename"]; ok {
-			cmd.eval(app, e.args)
-			if gSingleMode {
-				app.nav.renew()
-				app.ui.loadFile(app, true)
-			} else {
-				if err := remote("send load"); err != nil {
-					app.ui.echoerrf("rename: %s", err)
-					return
-				}
+
+		tag := "*"
+		if len(e.args) != 0 {
+			tag = e.args[0]
+		}
+
+		if err := app.nav.tag(tag); err != nil {
+			app.ui.echoerrf("tag: %s", err)
+		} else if err := app.nav.writeTags(); err != nil {
+			app.ui.echoerrf("tag: %s", err)
+		}
+
+		if gSingleMode {
+			if err := app.nav.sync(); err != nil {
+				app.ui.echoerrf("tag: %s", err)
 			}
 		} else {
-			curr, err := app.nav.currFile()
-			if err != nil {
-				app.ui.echoerrf("rename: %s:", err)
-				return
-			}
-			if app.ui.cmdPrefix == ">" {
-				return
-			}
-			normal(app)
-			app.ui.cmdPrefix = "rename: "
-			extension := getFileExtension(curr)
-			if len(extension) == 0 {
-				// no extension or .hidden or is directory
-				app.ui.cmdAccLeft = append(app.ui.cmdAccLeft, []rune(curr.Name())...)
-			} else {
-				app.ui.cmdAccLeft = append(app.ui.cmdAccLeft, []rune(curr.Name()[:len(curr.Name())-len(extension)])...)
-				app.ui.cmdAccRight = append(app.ui.cmdAccRight, []rune(extension)...)
+			if err := remote("send sync"); err != nil {
+				app.ui.echoerrf("tag: %s", err)
 			}
 		}
-		app.ui.loadFileInfo(app.nav)
-	case "sync":
-		if err := app.nav.sync(); err != nil {
-			app.ui.echoerrf("sync: %s", err)
+	case "tag-toggle":
+		if !app.nav.init {
+			return
+		}
+
+		tag := "*"
+		if len(e.args) != 0 {
+			tag = e.args[0]
+		}
+
+		if err := app.nav.tagToggle(tag); err != nil {
+			app.ui.echoerrf("tag-toggle: %s", err)
+		} else if err := app.nav.writeTags(); err != nil {
+			app.ui.echoerrf("tag-toggle: %s", err)
+		}
+
+		if gSingleMode {
+			if err := app.nav.sync(); err != nil {
+				app.ui.echoerrf("tag-toggle: %s", err)
+			}
+		} else {
+			if err := remote("send sync"); err != nil {
+				app.ui.echoerrf("tag-toggle: %s", err)
+			}
 		}
 	case "echo":
 		app.ui.echo(strings.Join(e.args, " "))
@@ -1836,30 +1802,6 @@ func (e *callExpr) eval(app *app, args []string) {
 			restartIncCmd(app)
 			onChdir(app)
 		}
-	case "glob-select":
-		if !app.nav.init {
-			return
-		}
-		if len(e.args) != 1 {
-			app.ui.echoerr("glob-select: requires a pattern to match")
-			return
-		}
-		if err := app.nav.globSel(e.args[0], false); err != nil {
-			app.ui.echoerrf("%s", err)
-			return
-		}
-	case "glob-unselect":
-		if !app.nav.init {
-			return
-		}
-		if len(e.args) != 1 {
-			app.ui.echoerr("glob-unselect: requires a pattern to match")
-			return
-		}
-		if err := app.nav.globSel(e.args[0], true); err != nil {
-			app.ui.echoerrf("%s", err)
-			return
-		}
 	case "source":
 		if len(e.args) != 1 {
 			app.ui.echoerr("source: requires an argument")
@@ -1876,12 +1818,134 @@ func (e *callExpr) eval(app *app, args []string) {
 		for _, val := range splitKeys(e.args[0]) {
 			app.ui.keyChan <- val
 		}
-	case "on-focus-gained":
-		onFocusGained(app)
-	case "on-focus-lost":
-		onFocusLost(app)
-	case "on-init":
-		onInit(app)
+	case "addcustominfo":
+		var k, v string
+		switch len(e.args) {
+		case 1:
+			k, v = e.args[0], ""
+		case 2:
+			k, v = e.args[0], e.args[1]
+		default:
+			app.ui.echoerr("addcustominfo: requires either 1 or 2 arguments")
+			return
+		}
+
+		path, err := filepath.Abs(replaceTilde(k))
+		if err != nil {
+			app.ui.echoerrf("addcustominfo: %s", err)
+			return
+		}
+
+		dir := filepath.Dir(path)
+		d, ok := app.nav.dirCache[dir]
+		if !ok {
+			app.ui.echoerrf("addcustominfo: dir not loaded: %s", dir)
+			return
+		}
+
+		var f *file
+		for _, file := range d.allFiles {
+			if file.path == path {
+				f = file
+				break
+			}
+		}
+		if f == nil {
+			app.ui.echoerrf("addcustominfo: file not found: %s", path)
+			return
+		}
+
+		if len(strings.Trim(v, " ")) == 0 {
+			v = ""
+		}
+		if f.customInfo != v {
+			f.customInfo = v
+			// only sort when order changes
+			if getSortBy(dir) == customSort {
+				d.sort()
+			}
+		}
+	case "calcdirsize":
+		if !app.nav.init {
+			return
+		}
+		err := app.nav.calcDirSize()
+		if err != nil {
+			app.ui.echoerrf("calcdirsize: %s", err)
+			return
+		}
+		app.ui.loadFileInfo(app.nav)
+		app.nav.sort()
+		app.ui.sort()
+	case "clearmaps":
+		// leave `:` and cmaps bound so the user can still exit using `:quit`
+		clear(gOpts.nkeys)
+		clear(gOpts.vkeys)
+		gOpts.nkeys[":"] = &callExpr{"read", nil, 1}
+		gOpts.vkeys[":"] = &callExpr{"read", nil, 1}
+	case "tty-write":
+		if len(e.args) != 1 {
+			app.ui.echoerr("tty-write: requires an argument")
+			return
+		}
+
+		tty, ok := app.ui.screen.Tty()
+		if !ok {
+			log.Printf("tty-write: failed to get tty")
+			return
+		}
+
+		tty.Write([]byte(e.args[0]))
+	case "visual":
+		if !app.nav.init {
+			return
+		}
+		visual(app)
+	case "visual-accept":
+		if !app.nav.init {
+			return
+		}
+		dir := app.nav.currDir()
+		for _, path := range dir.visualSelections() {
+			if _, ok := app.nav.selections[path]; !ok {
+				app.nav.selections[path] = app.nav.selectionInd
+				app.nav.selectionInd++
+			}
+		}
+		// resetting Visual mode here instead of inside `normal()`
+		// allows us to use Visual mode inside search, find etc.
+		dir.visualAnchor = -1
+		normal(app)
+	case "visual-unselect":
+		if !app.nav.init {
+			return
+		}
+		dir := app.nav.currDir()
+		for _, path := range dir.visualSelections() {
+			delete(app.nav.selections, path)
+		}
+		if len(app.nav.selections) == 0 {
+			app.nav.selectionInd = 0
+		}
+		dir.visualAnchor = -1
+		normal(app)
+	case "visual-discard":
+		if !app.nav.init {
+			return
+		}
+		dir := app.nav.currDir()
+		dir.visualAnchor = -1
+		normal(app)
+	case "visual-change":
+		if !app.nav.isVisualMode() {
+			return
+		}
+		dir := app.nav.currDir()
+		beg := max(dir.ind-dir.pos, 0)
+		dir.ind, dir.visualAnchor = dir.visualAnchor, dir.ind
+		dir.pos = dir.ind - beg
+		dir.visualWrap = -dir.visualWrap
+		dir.boundPos(app.nav.height)
 	case "cmd-insert":
 		if len(e.args) == 0 {
 			return
@@ -1893,12 +1957,11 @@ func (e *callExpr) eval(app *app, args []string) {
 		}
 		normal(app)
 	case "cmd-complete":
-		matches := doComplete(app)
-		app.ui.menu = listMatches(app.ui.screen, matches, -1)
+		app.doComplete()
 	case "cmd-menu-complete":
-		menuComplete(app, 1)
+		app.menuComplete(1)
 	case "cmd-menu-complete-back":
-		menuComplete(app, -1)
+		app.menuComplete(-1)
 	case "cmd-menu-accept":
 		app.ui.menu = ""
 		app.menuCompActive = false
@@ -2063,6 +2126,16 @@ func (e *callExpr) eval(app *app, args []string) {
 		default:
 			log.Printf("entering unknown execution prefix: %q", app.ui.cmdPrefix)
 		}
+	case "cmd-interrupt":
+		if app.cmd != nil {
+			err := shellKill(app.cmd)
+			if err != nil {
+				app.ui.echoerrf("kill: %s", err)
+			} else {
+				app.ui.echoerr("process interrupt")
+			}
+		}
+		normal(app)
 	case "cmd-history-next":
 		if !slices.Contains([]string{":", "$", "!", "%", "&"}, app.ui.cmdPrefix) {
 			return
@@ -2094,6 +2167,24 @@ func (e *callExpr) eval(app *app, args []string) {
 		app.cmdHistoryInd = historyInd
 		app.ui.cmdPrefix = cmd.prefix
 		app.ui.cmdAccLeft = []rune(cmd.value)
+	case "cmd-left":
+		if len(app.ui.cmdAccLeft) == 0 {
+			return
+		}
+		app.ui.cmdAccRight = append([]rune{app.ui.cmdAccLeft[len(app.ui.cmdAccLeft)-1]}, app.ui.cmdAccRight...)
+		app.ui.cmdAccLeft = app.ui.cmdAccLeft[:len(app.ui.cmdAccLeft)-1]
+	case "cmd-right":
+		if len(app.ui.cmdAccRight) == 0 {
+			return
+		}
+		app.ui.cmdAccLeft = append(app.ui.cmdAccLeft, app.ui.cmdAccRight[0])
+		app.ui.cmdAccRight = app.ui.cmdAccRight[1:]
+	case "cmd-home":
+		app.ui.cmdAccRight = append(app.ui.cmdAccLeft, app.ui.cmdAccRight...)
+		app.ui.cmdAccLeft = nil
+	case "cmd-end":
+		app.ui.cmdAccLeft = append(app.ui.cmdAccLeft, app.ui.cmdAccRight...)
+		app.ui.cmdAccRight = nil
 	case "cmd-delete":
 		if len(app.ui.cmdAccRight) == 0 {
 			return
@@ -2116,24 +2207,6 @@ func (e *callExpr) eval(app *app, args []string) {
 		}
 		app.ui.cmdAccLeft = app.ui.cmdAccLeft[:len(app.ui.cmdAccLeft)-1]
 		update(app)
-	case "cmd-left":
-		if len(app.ui.cmdAccLeft) == 0 {
-			return
-		}
-		app.ui.cmdAccRight = append([]rune{app.ui.cmdAccLeft[len(app.ui.cmdAccLeft)-1]}, app.ui.cmdAccRight...)
-		app.ui.cmdAccLeft = app.ui.cmdAccLeft[:len(app.ui.cmdAccLeft)-1]
-	case "cmd-right":
-		if len(app.ui.cmdAccRight) == 0 {
-			return
-		}
-		app.ui.cmdAccLeft = append(app.ui.cmdAccLeft, app.ui.cmdAccRight[0])
-		app.ui.cmdAccRight = app.ui.cmdAccRight[1:]
-	case "cmd-home":
-		app.ui.cmdAccRight = append(app.ui.cmdAccLeft, app.ui.cmdAccRight...)
-		app.ui.cmdAccLeft = nil
-	case "cmd-end":
-		app.ui.cmdAccLeft = append(app.ui.cmdAccLeft, app.ui.cmdAccRight...)
-		app.ui.cmdAccRight = nil
 	case "cmd-delete-home":
 		if len(app.ui.cmdAccLeft) == 0 {
 			return
@@ -2161,106 +2234,6 @@ func (e *callExpr) eval(app *app, args []string) {
 			return
 		}
 		app.ui.cmdAccLeft[len(app.ui.cmdAccLeft)-1], app.ui.cmdAccLeft[len(app.ui.cmdAccLeft)-2] = app.ui.cmdAccLeft[len(app.ui.cmdAccLeft)-2], app.ui.cmdAccLeft[len(app.ui.cmdAccLeft)-1]
-		update(app)
-	case "cmd-interrupt":
-		if app.cmd != nil {
-			err := shellKill(app.cmd)
-			if err != nil {
-				app.ui.echoerrf("kill: %s", err)
-			} else {
-				app.ui.echoerr("process interrupt")
-			}
-		}
-		normal(app)
-	case "cmd-word":
-		if len(app.ui.cmdAccRight) == 0 {
-			return
-		}
-		loc := reWordEnd.FindStringSubmatchIndex(string(app.ui.cmdAccRight))
-		if loc == nil {
-			return
-		}
-		ind := loc[3]
-		app.ui.cmdAccLeft = append(app.ui.cmdAccLeft, []rune(string(app.ui.cmdAccRight)[:ind])...)
-		app.ui.cmdAccRight = []rune(string(app.ui.cmdAccRight)[ind:])
-	case "cmd-word-back":
-		if len(app.ui.cmdAccLeft) == 0 {
-			return
-		}
-		locs := reWordBeg.FindAllStringSubmatchIndex(string(app.ui.cmdAccLeft), -1)
-		if locs == nil {
-			return
-		}
-		ind := locs[len(locs)-1][3]
-		old := app.ui.cmdAccRight
-		app.ui.cmdAccRight = append([]rune(string(app.ui.cmdAccLeft)[ind:]), old...)
-		app.ui.cmdAccLeft = []rune(string(app.ui.cmdAccLeft)[:ind])
-	case "cmd-capitalize-word":
-		if len(app.ui.cmdAccRight) == 0 {
-			return
-		}
-		ind := 0
-		for ; ind < len(app.ui.cmdAccRight) && unicode.IsSpace(app.ui.cmdAccRight[ind]); ind++ {
-		}
-		if ind >= len(app.ui.cmdAccRight) {
-			return
-		}
-		app.ui.cmdAccRight[ind] = unicode.ToUpper(app.ui.cmdAccRight[ind])
-		loc := reWordEnd.FindStringSubmatchIndex(string(app.ui.cmdAccRight))
-		if loc == nil {
-			return
-		}
-		ind = loc[3]
-		app.ui.cmdAccLeft = append(app.ui.cmdAccLeft, []rune(string(app.ui.cmdAccRight)[:ind])...)
-		app.ui.cmdAccRight = []rune(string(app.ui.cmdAccRight)[ind:])
-		update(app)
-	case "cmd-delete-word":
-		if len(app.ui.cmdAccRight) == 0 {
-			return
-		}
-		loc := reWordEnd.FindStringSubmatchIndex(string(app.ui.cmdAccRight))
-		if loc == nil {
-			return
-		}
-		ind := loc[3]
-		app.ui.cmdYankBuf = []rune(string(app.ui.cmdAccRight)[:ind])
-		app.ui.cmdAccRight = []rune(string(app.ui.cmdAccRight)[ind:])
-		update(app)
-	case "cmd-delete-word-back":
-		if len(app.ui.cmdAccLeft) == 0 {
-			return
-		}
-		locs := reWordBeg.FindAllStringSubmatchIndex(string(app.ui.cmdAccLeft), -1)
-		if locs == nil {
-			return
-		}
-		ind := locs[len(locs)-1][3]
-		app.ui.cmdYankBuf = []rune(string(app.ui.cmdAccLeft)[ind:])
-		app.ui.cmdAccLeft = []rune(string(app.ui.cmdAccLeft)[:ind])
-		update(app)
-	case "cmd-uppercase-word":
-		if len(app.ui.cmdAccRight) == 0 {
-			return
-		}
-		loc := reWordEnd.FindStringSubmatchIndex(string(app.ui.cmdAccRight))
-		if loc == nil {
-			return
-		}
-		ind := loc[3]
-		app.ui.cmdAccLeft = append(app.ui.cmdAccLeft, []rune(strings.ToUpper(string(app.ui.cmdAccRight)[:ind]))...)
-		app.ui.cmdAccRight = []rune(string(app.ui.cmdAccRight)[ind:])
-		update(app)
-	case "cmd-lowercase-word":
-		if len(app.ui.cmdAccRight) == 0 {
-			return
-		}
-		loc := reWordEnd.FindStringSubmatchIndex(string(app.ui.cmdAccRight))
-		if loc == nil {
-			return
-		}
-		ind := loc[3]
-		app.ui.cmdAccLeft = append(app.ui.cmdAccLeft, []rune(strings.ToLower(string(app.ui.cmdAccRight)[:ind]))...)
-		app.ui.cmdAccRight = []rune(string(app.ui.cmdAccRight)[ind:])
 		update(app)
 	case "cmd-transpose-word":
 		if len(app.ui.cmdAccLeft) == 0 {
@@ -2294,102 +2267,102 @@ func (e *callExpr) eval(app *app, args []string) {
 			[]rune(string(app.ui.cmdAccLeft)[end2:]),
 		)
 		update(app)
-	case "addcustominfo":
-		var k, v string
-		switch len(e.args) {
-		case 1:
-			k, v = e.args[0], ""
-		case 2:
-			k, v = e.args[0], e.args[1]
-		default:
-			app.ui.echoerr("addcustominfo: requires either 1 or 2 arguments")
+	case "cmd-word":
+		if len(app.ui.cmdAccRight) == 0 {
 			return
 		}
-
-		path, err := filepath.Abs(replaceTilde(k))
-		if err != nil {
-			app.ui.echoerrf("addcustominfo: %s", err)
+		loc := reWordEnd.FindStringSubmatchIndex(string(app.ui.cmdAccRight))
+		if loc == nil {
 			return
 		}
-
-		dir := filepath.Dir(path)
-		d, ok := app.nav.dirCache[dir]
-		if !ok {
-			app.ui.echoerrf("addcustominfo: dir not loaded: %s", dir)
+		ind := loc[3]
+		app.ui.cmdAccLeft = append(app.ui.cmdAccLeft, []rune(string(app.ui.cmdAccRight)[:ind])...)
+		app.ui.cmdAccRight = []rune(string(app.ui.cmdAccRight)[ind:])
+	case "cmd-word-back":
+		if len(app.ui.cmdAccLeft) == 0 {
 			return
 		}
-
-		var f *file
-		for _, file := range d.allFiles {
-			if file.path == path {
-				f = file
-				break
-			}
-		}
-		if f == nil {
-			app.ui.echoerrf("addcustominfo: file not found: %s", path)
+		locs := reWordBeg.FindAllStringSubmatchIndex(string(app.ui.cmdAccLeft), -1)
+		if locs == nil {
 			return
 		}
-
-		if len(strings.Trim(v, " ")) == 0 {
-			v = ""
-		}
-		if f.customInfo != v {
-			f.customInfo = v
-			// only sort when order changes
-			if getSortBy(dir) == customSort {
-				d.sort()
-			}
-		}
-	case "visual":
-		if !app.nav.init {
+		ind := locs[len(locs)-1][3]
+		old := app.ui.cmdAccRight
+		app.ui.cmdAccRight = append([]rune(string(app.ui.cmdAccLeft)[ind:]), old...)
+		app.ui.cmdAccLeft = []rune(string(app.ui.cmdAccLeft)[:ind])
+	case "cmd-delete-word":
+		if len(app.ui.cmdAccRight) == 0 {
 			return
 		}
-		visual(app)
-	case "visual-accept":
-		if !app.nav.init {
+		loc := reWordEnd.FindStringSubmatchIndex(string(app.ui.cmdAccRight))
+		if loc == nil {
 			return
 		}
-		dir := app.nav.currDir()
-		for _, path := range dir.visualSelections() {
-			if _, ok := app.nav.selections[path]; !ok {
-				app.nav.selections[path] = app.nav.selectionInd
-				app.nav.selectionInd++
-			}
-		}
-		// resetting visual mode here instead of inside `normal()`
-		// allows us to use visual mode inside search, find etc.
-		dir.visualAnchor = -1
-		normal(app)
-	case "visual-unselect":
-		if !app.nav.init {
+		ind := loc[3]
+		app.ui.cmdYankBuf = []rune(string(app.ui.cmdAccRight)[:ind])
+		app.ui.cmdAccRight = []rune(string(app.ui.cmdAccRight)[ind:])
+		update(app)
+	case "cmd-delete-word-back":
+		if len(app.ui.cmdAccLeft) == 0 {
 			return
 		}
-		dir := app.nav.currDir()
-		for _, path := range dir.visualSelections() {
-			delete(app.nav.selections, path)
-		}
-		if len(app.nav.selections) == 0 {
-			app.nav.selectionInd = 0
-		}
-		dir.visualAnchor = -1
-		normal(app)
-	case "visual-discard":
-		if !app.nav.init {
+		locs := reWordBeg.FindAllStringSubmatchIndex(string(app.ui.cmdAccLeft), -1)
+		if locs == nil {
 			return
 		}
-		dir := app.nav.currDir()
-		dir.visualAnchor = -1
-		normal(app)
-	case "visual-change":
-		if !app.nav.isVisualMode() {
+		ind := locs[len(locs)-1][3]
+		app.ui.cmdYankBuf = []rune(string(app.ui.cmdAccLeft)[ind:])
+		app.ui.cmdAccLeft = []rune(string(app.ui.cmdAccLeft)[:ind])
+		update(app)
+	case "cmd-capitalize-word":
+		if len(app.ui.cmdAccRight) == 0 {
 			return
 		}
-		dir := app.nav.currDir()
-		beg := max(dir.ind-dir.pos, 0)
-		dir.ind, dir.visualAnchor = dir.visualAnchor, dir.ind
-		dir.pos = dir.ind - beg
-		dir.boundPos(app.nav.height)
+		ind := 0
+		for ; ind < len(app.ui.cmdAccRight) && unicode.IsSpace(app.ui.cmdAccRight[ind]); ind++ {
+		}
+		if ind >= len(app.ui.cmdAccRight) {
+			return
+		}
+		app.ui.cmdAccRight[ind] = unicode.ToUpper(app.ui.cmdAccRight[ind])
+		loc := reWordEnd.FindStringSubmatchIndex(string(app.ui.cmdAccRight))
+		if loc == nil {
+			return
+		}
+		ind = loc[3]
+		app.ui.cmdAccLeft = append(app.ui.cmdAccLeft, []rune(string(app.ui.cmdAccRight)[:ind])...)
+		app.ui.cmdAccRight = []rune(string(app.ui.cmdAccRight)[ind:])
+		update(app)
+	case "cmd-uppercase-word":
+		if len(app.ui.cmdAccRight) == 0 {
+			return
+		}
+		loc := reWordEnd.FindStringSubmatchIndex(string(app.ui.cmdAccRight))
+		if loc == nil {
+			return
+		}
+		ind := loc[3]
+		app.ui.cmdAccLeft = append(app.ui.cmdAccLeft, []rune(strings.ToUpper(string(app.ui.cmdAccRight)[:ind]))...)
+		app.ui.cmdAccRight = []rune(string(app.ui.cmdAccRight)[ind:])
+		update(app)
+	case "cmd-lowercase-word":
+		if len(app.ui.cmdAccRight) == 0 {
+			return
+		}
+		loc := reWordEnd.FindStringSubmatchIndex(string(app.ui.cmdAccRight))
+		if loc == nil {
+			return
+		}
+		ind := loc[3]
+		app.ui.cmdAccLeft = append(app.ui.cmdAccLeft, []rune(strings.ToLower(string(app.ui.cmdAccRight)[:ind]))...)
+		app.ui.cmdAccRight = []rune(string(app.ui.cmdAccRight)[ind:])
+		update(app)
+	case "on-focus-gained":
+		onFocusGained(app)
+	case "on-focus-lost":
+		onFocusLost(app)
+	case "on-init":
+		onInit(app)
 	default:
 		cmd, ok := gOpts.cmds[e.name]
 		if !ok {

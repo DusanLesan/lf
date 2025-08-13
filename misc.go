@@ -32,14 +32,6 @@ func replaceTilde(s string) string {
 	return s
 }
 
-func evalSymlinks(path string) string {
-	if target, err := filepath.EvalSymlinks(path); err == nil {
-		return target
-	}
-
-	return path
-}
-
 func runeSliceWidth(rs []rune) int {
 	w := 0
 	for _, r := range rs {
@@ -86,7 +78,7 @@ func runeSliceWidthLastRange(rs []rune, maxWidth int) []rune {
 
 // This function is used to escape whitespaces and special characters with
 // backslashes in a given string.
-func escape(s string) string {
+func cmdEscape(s string) string {
 	buf := make([]rune, 0, len(s))
 	for _, r := range s {
 		if unicode.IsSpace(r) || r == '\\' || r == ';' || r == '#' {
@@ -99,7 +91,7 @@ func escape(s string) string {
 
 // This function is used to remove backslashes that are used to escape
 // whitespaces and special characters in a given string.
-func unescape(s string) string {
+func cmdUnescape(s string) string {
 	esc := false
 	buf := make([]rune, 0, len(s))
 	for _, r := range s {
@@ -125,27 +117,28 @@ func unescape(s string) string {
 }
 
 // This function splits the given string by whitespaces. It is aware of escaped
-// whitespaces so that they are not split unintentionally.
+// and quoted whitespaces so that they are not split unintentionally.
 func tokenize(s string) []string {
 	esc := false
+	quote := false
 	var buf []rune
 	var toks []string
 	for _, r := range s {
-		if r == '\\' {
-			esc = true
-			buf = append(buf, r)
-			continue
-		}
-		if esc {
+		switch {
+		case esc:
 			esc = false
 			buf = append(buf, r)
-			continue
-		}
-		if !unicode.IsSpace(r) {
+		case r == '\\':
+			esc = true
 			buf = append(buf, r)
-		} else {
+		case r == '"':
+			quote = !quote
+			buf = append(buf, r)
+		case unicode.IsSpace(r) && !quote:
 			toks = append(toks, string(buf))
 			buf = nil
+		default:
+			buf = append(buf, r)
 		}
 	}
 	return append(toks, string(buf))
@@ -242,38 +235,43 @@ func readPairs(r io.Reader) ([][]string, error) {
 	return readArrays(r, 2, 2)
 }
 
-// This function converts a size in bytes to a human readable form using metric
-// suffixes (e.g. 1K = 1000). For values less than 10 the first significant
-// digit is shown, otherwise it is hidden. Numbers are always rounded down.
-// This should be fine for most human beings.
-func humanize(size int64) string {
-	if size < 1000 {
+// This function converts a size in bytes to a human readable form using
+// prefixes for binary multiples (e.g., 1 KiB = 1024 B). The output should be
+// no more than 5 characters long.
+func humanize(size uint64) string {
+	if size < 1024 {
 		return fmt.Sprintf("%dB", size)
 	}
 
-	suffix := []string{
-		"K", // kilo
-		"M", // mega
-		"G", // giga
-		"T", // tera
-		"P", // peta
-		"E", // exa
-		"Z", // zeta
-		"Y", // yotta
+	// Shortened (due to TUI space constraints) version of
+	// IEC 80000-13:2025 prefixes for binary multiples.
+	// *Note*: due to [`FileSize.Size()`](https://pkg.go.dev/io/fs#FileInfo)
+	// being `int64`, maximum possible representable value would be 8 EiB.
+	prefixes := []string{
+		"K", // kibi (2^10)
+		"M", // mebi (2^20)
+		"G", // gibi (2^30)
+		"T", // tebi (2^40)
+		"P", // pebi (2^50)
+		"E", // exbi (2^60)
+		"Z", // zebi (2^70)
+		"Y", // yobi (2^80)
+		"R", // robi (2^90)
+		"Q", // quebi (2^100)
 	}
 
-	curr := float64(size) / 1000
-	for _, s := range suffix {
-		if curr < 10 {
-			return fmt.Sprintf("%.1f%s", curr-0.0499, s)
+	curr := float64(size) / 1024
+	for _, prefix := range prefixes {
+		if curr < 99.95 {
+			return fmt.Sprintf("%.1f%s", curr, prefix)
 		}
-		if curr < 1000 {
-			return fmt.Sprintf("%d%s", int(curr), s)
+		if curr < 1023.5 {
+			return fmt.Sprintf("%.0f%s", curr, prefix)
 		}
-		curr /= 1000
+		curr /= 1024
 	}
 
-	return ""
+	return fmt.Sprintf("+999%s", prefixes[len(prefixes)-1])
 }
 
 // This function compares two strings for natural sorting which takes into

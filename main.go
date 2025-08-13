@@ -89,6 +89,16 @@ func exportEnvVars() {
 	os.Setenv("LF_LEVEL", strconv.Itoa(level))
 }
 
+func exportFlags() {
+	os.Setenv("lf_flag_config", gConfigPath)
+	os.Setenv("lf_flag_last_dir_path", gLastDirPath)
+	os.Setenv("lf_flag_log", gLogPath)
+	os.Setenv("lf_flag_print_last_dir", strconv.FormatBool(gPrintLastDir))
+	os.Setenv("lf_flag_print_selection", strconv.FormatBool(gPrintSelection))
+	os.Setenv("lf_flag_selection_path", gSelectionPath)
+	os.Setenv("lf_flag_single", strconv.FormatBool(gSingleMode))
+}
+
 // used by exportOpts below
 func fieldToString(field reflect.Value) string {
 	kind := field.Kind()
@@ -126,7 +136,7 @@ func getOptsMap() map[string]string {
 		name := "lf_" + t.Field(i).Name
 
 		// Skip maps
-		if name == "lf_keys" || name == "lf_cmdkeys" || name == "lf_cmds" {
+		if name == "lf_nkeys" || name == "lf_vkeys" || name == "lf_cmdkeys" || name == "lf_cmds" {
 			continue
 		}
 
@@ -355,6 +365,7 @@ func main() {
 		}
 
 		exportEnvVars()
+		exportFlags()
 
 		run()
 	}

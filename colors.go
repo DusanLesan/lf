@@ -88,14 +88,6 @@ func parseStyles() styleMap {
 	return sm
 }
 
-func parseEscapeSequence(s string) tcell.Style {
-	s = strings.TrimPrefix(s, "\033[")
-	if i := strings.IndexByte(s, 'm'); i >= 0 {
-		s = s[:i]
-	}
-	return applyAnsiCodes(s, tcell.StyleDefault)
-}
-
 func parseColor(toks []string) (tcell.Color, int, error) {
 	if len(toks) == 0 {
 		return tcell.ColorDefault, 0, fmt.Errorf("invalid args: %v", toks)
@@ -136,8 +128,6 @@ func applyAnsiCodes(s string, st tcell.Style) tcell.Style {
 	toks := strings.Split(s, ";")
 
 	// ECMA-48 details the standard
-	// TODO: should we support turning off attributes?
-	//    Probably because this is used for previewers too
 	tokslen := len(toks)
 
 loop:
@@ -173,6 +163,18 @@ loop:
 			st = st.Foreground(bg)
 		case "9":
 			st = st.StrikeThrough(true)
+		case "22":
+			st = st.Bold(false).Dim(false)
+		case "23":
+			st = st.Italic(false)
+		case "24":
+			st = st.Underline(false)
+		case "25":
+			st = st.Blink(false)
+		case "27":
+			st = st.Reverse(false)
+		case "29":
+			st = st.StrikeThrough(false)
 		case "30", "31", "32", "33", "34", "35", "36", "37":
 			n, _ := strconv.Atoi(toks[i])
 			st = st.Foreground(tcell.PaletteColor(n - 30))

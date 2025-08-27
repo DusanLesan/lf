@@ -391,22 +391,17 @@ func (app *app) loop() {
 			}
 			app.ui.draw(app.nav)
 		case d := <-app.nav.dirChan:
-			if gOpts.dircache {
-				prev, ok := app.nav.dirCache[d.path]
-				if ok {
-					d.ind = prev.ind
-					d.pos = prev.pos
-					d.visualAnchor = min(prev.visualAnchor, len(d.files)-1)
-					d.visualWrap = prev.visualWrap
-					d.filter = prev.filter
-					d.sort()
-					d.sel(prev.name(), app.nav.height)
-				}
-
-				app.nav.dirCache[d.path] = d
-			} else {
+			prev, ok := app.nav.dirCache[d.path]
+			if ok {
+				d.ind = prev.ind
+				d.pos = prev.pos
+				d.visualAnchor = min(prev.visualAnchor, len(d.files)-1)
+				d.visualWrap = prev.visualWrap
+				d.filter = prev.filter
 				d.sort()
+				d.sel(prev.name(), app.nav.height)
 			}
+			app.nav.dirCache[d.path] = d
 
 			var oldCurrPath string
 			if curr, err := app.nav.currFile(); err == nil {
@@ -425,9 +420,6 @@ func (app *app) loop() {
 			if err == nil {
 				if curr.path != oldCurrPath {
 					app.ui.loadFile(app, true)
-					if app.ui.msgIsStat {
-						app.ui.loadFileInfo(app.nav)
-					}
 				}
 				if d.path == curr.path {
 					app.ui.dirPrev = d
@@ -450,9 +442,7 @@ func (app *app) loop() {
 			if err == nil {
 				if r.path == curr.path {
 					app.ui.regPrev = r
-					if gOpts.sixel {
-						app.ui.sxScreen.forceClear = true
-					}
+					app.ui.sxScreen.forceClear = true
 				}
 			}
 
@@ -476,10 +466,6 @@ func (app *app) loop() {
 			}
 
 			app.ui.loadFile(app, false)
-			if app.ui.msgIsStat {
-				app.ui.loadFileInfo(app.nav)
-			}
-
 			onLoad(app, []string{f.path})
 			app.ui.draw(app.nav)
 		case path := <-app.nav.delChan:
@@ -688,7 +674,7 @@ func (app *app) doComplete() (matches []compMatch) {
 	}
 
 	app.ui.cmdAccLeft = []rune(result)
-	app.ui.menu = listMatches(app.ui.screen, matches, -1)
+	app.ui.menu, app.ui.menuSelect = listMatches(app.ui.screen, matches, -1)
 	return
 }
 
@@ -711,7 +697,7 @@ func (app *app) menuComplete(direction int) {
 		app.menuCompTmp[len(app.menuCompTmp)-1] = app.menuComps[app.menuCompInd].result
 		app.ui.cmdAccLeft = []rune(strings.Join(app.menuCompTmp, " "))
 	}
-	app.ui.menu = listMatches(app.ui.screen, app.menuComps, app.menuCompInd)
+	app.ui.menu, app.ui.menuSelect = listMatches(app.ui.screen, app.menuComps, app.menuCompInd)
 }
 
 func (app *app) watchDir(dir *dir) {

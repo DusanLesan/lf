@@ -2,9 +2,11 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"io/fs"
+	"math/big"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -12,15 +14,20 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/Xuanwo/go-locale"
+	"github.com/gdamore/tcell/v2"
 	"github.com/mattn/go-runewidth"
-	"golang.org/x/text/collate"
-	"golang.org/x/text/language"
 )
 
-const (
-	localeStrDisable = ""  // disable locale ordering for this locale value
-	localeStrSys     = "*" // replace this locale value with locale value read from environment
+var (
+	reModKey    = regexp.MustCompile(`<(c|s|a)-(.+)>`)
+	reRulerSub  = regexp.MustCompile(`%[apmcsvfithPd]|%\{[^}]+\}`)
+	reSixelSize = regexp.MustCompile(`"1;1;(\d+);(\d+)`)
+)
+
+var (
+	reWord    = regexp.MustCompile(`(\pL|\pN)+`)
+	reWordBeg = regexp.MustCompile(`([^\pL\pN]|^)(\pL|\pN)`)
+	reWordEnd = regexp.MustCompile(`(\pL|\pN)([^\pL\pN]|$)`)
 )
 
 func isRoot(name string) bool { return filepath.Dir(name) == name }
@@ -236,39 +243,48 @@ func readPairs(r io.Reader) ([][]string, error) {
 }
 
 // This function converts a size in bytes to a human readable form using
-// prefixes for binary multiples (e.g., 1 KiB = 1024 B). The output should be
-// no more than 5 characters long.
+// prefixes for either binary (1 KiB = 1024 B) or decimal (1 KB = 1000 B)
+// multiples. The output should be no more than 5 characters long.
 func humanize(size uint64) string {
-	if size < 1024 {
+	var base uint64 = 1024
+	if gOpts.sizeunits == "decimal" {
+		base = 1000
+	}
+
+	if size < base {
 		return fmt.Sprintf("%dB", size)
 	}
 
-	// Shortened (due to TUI space constraints) version of
-	// IEC 80000-13:2025 prefixes for binary multiples.
 	// *Note*: due to [`FileSize.Size()`](https://pkg.go.dev/io/fs#FileInfo)
-	// being `int64`, maximum possible representable value would be 8 EiB.
+	// being `int64`, the maximum possible representable value would be 8 EiB or
+	// 9.2 EB.
 	prefixes := []string{
-		"K", // kibi (2^10)
-		"M", // mebi (2^20)
-		"G", // gibi (2^30)
-		"T", // tebi (2^40)
-		"P", // pebi (2^50)
-		"E", // exbi (2^60)
-		"Z", // zebi (2^70)
-		"Y", // yobi (2^80)
-		"R", // robi (2^90)
-		"Q", // quebi (2^100)
+		"K", // kibi (2^10) or kilo (10^3)
+		"M", // mebi (2^20) or mega (10^6)
+		"G", // gibi (2^30) or giga (10^9)
+		"T", // tebi (2^40) or tera (10^2)
+		"P", // pebi (2^50) or peta (10^15)
+		"E", // exbi (2^60) or exa (10^18)
+		"Z", // zebi (2^70) or zetta (10^21)
+		"Y", // yobi (2^80) or yotta (10^24)
+		"R", // robi (2^90) or ronna (10^27)
+		"Q", // quebi (2^100) or quetta (10^30)
 	}
 
-	curr := float64(size) / 1024
+	curr := big.NewRat(int64(size), int64(base))
+
 	for _, prefix := range prefixes {
-		if curr < 99.95 {
-			return fmt.Sprintf("%.1f%s", curr, prefix)
+		// if curr < 99.95 then round to 1 decimal place
+		if curr.Cmp(big.NewRat(9995, 100)) < 0 {
+			return fmt.Sprintf("%s%s", curr.FloatString(1), prefix)
 		}
-		if curr < 1023.5 {
-			return fmt.Sprintf("%.0f%s", curr, prefix)
+
+		// if curr < base-0.5 then round to the nearest integer
+		if curr.Cmp(new(big.Rat).Sub(big.NewRat(int64(base), 1), big.NewRat(1, 2))) < 0 {
+			return fmt.Sprintf("%s%s", curr.FloatString(0), prefix)
 		}
-		curr /= 1024
+
+		curr.Quo(curr, big.NewRat(int64(base), 1))
 	}
 
 	return fmt.Sprintf("+999%s", prefixes[len(prefixes)-1])
@@ -331,52 +347,6 @@ func getFileExtension(file fs.FileInfo) string {
 	return filepath.Ext(file.Name())
 }
 
-var (
-	reModKey    = regexp.MustCompile(`<(c|s|a)-(.+)>`)
-	reRulerSub  = regexp.MustCompile(`%[apmcsvfithPd]|%\{[^}]+\}`)
-	reSixelSize = regexp.MustCompile(`"1;1;(\d+);(\d+)`)
-)
-
-var (
-	reWord    = regexp.MustCompile(`(\pL|\pN)+`)
-	reWordBeg = regexp.MustCompile(`([^\pL\pN]|^)(\pL|\pN)`)
-	reWordEnd = regexp.MustCompile(`(\pL|\pN)([^\pL\pN]|$)`)
-)
-
-// This function parses given locale string into language tag value. Passing empty
-// string as locale means reading locale value from environment.
-func getLocaleTag(localeStr string) (language.Tag, error) {
-	if localeStr == localeStrSys {
-		// read environment locale
-		return locale.Detect()
-	}
-
-	localeTag, err := language.Parse(localeStr)
-	if err != nil {
-		return localeTag, fmt.Errorf("invalid locale %q: %s", localeStr, err)
-	}
-
-	return localeTag, nil
-}
-
-// This function creates new collator for given locale. Passing empty string as
-// as locale means reading locale value from environment.
-//
-// *Note*: this function returns error when given `localeStr` has value `localeStrDisable`
-// or is an invalid locale tag.
-func makeCollator(localeStr string, opts ...collate.Option) (*collate.Collator, error) {
-	if localeStr == localeStrDisable {
-		return nil, fmt.Errorf("locale is disabled")
-	}
-
-	localeTag, err := getLocaleTag(localeStr)
-	if err != nil {
-		return nil, err
-	}
-
-	return collate.New(localeTag, opts...), nil
-}
-
 // This function deletes entries from a map if the key is either the given path
 // or a subpath of it.
 // This is useful for clearing cached data when a directory is moved or deleted.
@@ -388,6 +358,26 @@ func deletePathRecursive[T any](m map[string]T, path string) {
 			delete(m, k)
 		}
 	}
+}
+
+// This function takes an escape sequence option (e.g. `\033[1m`) and outputs a
+// complete format string (e.g. `\033[1m%s\033[0m`).
+func optionToFmtstr(optstr string) string {
+	if !strings.Contains(optstr, "%s") {
+		return optstr + "%s\033[0m"
+	} else {
+		return optstr
+	}
+}
+
+// This function takes an escape sequence option (e.g. `\033[1m`) and converts
+// it to a `tcell.Style` object.
+func parseEscapeSequence(s string) tcell.Style {
+	s = strings.TrimPrefix(s, "\033[")
+	if i := strings.IndexByte(s, 'm'); i >= 0 {
+		s = s[:i]
+	}
+	return applyAnsiCodes(s, tcell.StyleDefault)
 }
 
 // This function is used to remove style-related ANSI escape sequences from
@@ -419,6 +409,73 @@ func stripAnsi(s string) string {
 	}
 
 	return b.String()
+}
+
+// This function reads lines from a file to be displayed as a preview.
+// The number of lines to read is capped since files can be very large.
+// Lines are split on `\n` characters, and `\r` characters are discarded.
+// Sixel images are also detected and stored as separate lines.
+// The presence of a null byte outside a sixel image indicates a binary file.
+func readLines(reader io.ByteReader, maxLines int) (lines []string, binary bool, sixel bool) {
+	var buf bytes.Buffer
+	var last byte
+	inSixel := false
+
+	for {
+		b, err := reader.ReadByte()
+		if err != nil {
+			if buf.Len() > 0 {
+				lines = append(lines, buf.String())
+			}
+			return
+		}
+
+		if inSixel {
+			buf.WriteByte(b)
+			if b == '\\' && last == '\033' {
+				lines = append(lines, buf.String())
+				buf.Reset()
+				if len(lines) >= maxLines {
+					return
+				}
+				inSixel = false
+			}
+		} else {
+			switch {
+			case b == 0:
+				return nil, true, false
+			case b == '\033':
+				// withhold as it could be the start of a sixel image
+			case b == 'P' && last == '\033':
+				if buf.Len() > 0 {
+					lines = append(lines, buf.String())
+					buf.Reset()
+					if len(lines) >= maxLines {
+						return
+					}
+				}
+				buf.WriteByte(last)
+				buf.WriteByte(b)
+				inSixel = true
+				sixel = true
+			case last == '\033':
+				// not a sixel image
+				buf.WriteByte(last)
+				buf.WriteByte(b)
+			case b == '\r':
+			case b == '\n':
+				lines = append(lines, buf.String())
+				buf.Reset()
+				if len(lines) >= maxLines {
+					return
+				}
+			default:
+				buf.WriteByte(b)
+			}
+		}
+
+		last = b
+	}
 }
 
 // We don't need no generic code

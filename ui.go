@@ -270,12 +270,14 @@ func (win *win) printReg(screen tcell.Screen, reg *reg, previewLoading bool, sxs
 		return
 	}
 
-	for i, l := range reg.lines {
-		if i > win.h-1 {
-			break
-		}
+	if !reg.sixel {
+		for i, l := range reg.lines {
+			if i > win.h-1 {
+				break
+			}
 
-		st = win.print(screen, 2, i, st, l)
+			st = win.print(screen, 2, i, st, l)
+		}
 	}
 
 	sxs.printSixel(win, screen, reg)
@@ -637,6 +639,11 @@ func getWins(screen tcell.Screen) []*win {
 	return wins
 }
 
+type menuSelect struct {
+	x, y int
+	s    string
+}
+
 type ui struct {
 	screen      tcell.Screen
 	sxScreen    sixelScreen
@@ -646,7 +653,6 @@ type ui struct {
 	msgWin      *win
 	menuWin     *win
 	msg         string
-	msgIsStat   bool
 	regPrev     *reg
 	dirPrev     *dir
 	exprChan    chan expr
@@ -654,6 +660,7 @@ type ui struct {
 	tevChan     chan tcell.Event
 	evChan      chan tcell.Event
 	menu        string
+	menuSelect  *menuSelect
 	cmdPrefix   string
 	cmdAccLeft  []rune
 	cmdAccRight []rune
@@ -676,7 +683,6 @@ func newUI(screen tcell.Screen) *ui {
 		promptWin:   newWin(wtot, 1, 0, 0),
 		msgWin:      newWin(wtot, 1, 0, htot-1),
 		menuWin:     newWin(wtot, 1, 0, htot-2),
-		msgIsStat:   true,
 		exprChan:    make(chan expr, 1000),
 		keyChan:     make(chan string, 1000),
 		tevChan:     make(chan tcell.Event, 1000),
@@ -734,20 +740,11 @@ func (ui *ui) sort() {
 
 func (ui *ui) echo(msg string) {
 	ui.msg = msg
-	ui.msgIsStat = false
 }
 
 func (ui *ui) echomsg(msg string) {
 	ui.echo(msg)
 	log.Print(msg)
-}
-
-func optionToFmtstr(optstr string) string {
-	if !strings.Contains(optstr, "%s") {
-		return optstr + "%s\033[0m"
-	} else {
-		return optstr
-	}
 }
 
 func (ui *ui) echoerr(msg string) {
@@ -768,7 +765,7 @@ type reg struct {
 	loadTime time.Time
 	path     string
 	lines    []string
-	sixel    *string
+	sixel    bool
 }
 
 func (ui *ui) loadFile(app *app, volatile bool) {
@@ -799,57 +796,6 @@ func (ui *ui) loadFile(app *app, volatile bool) {
 	} else if curr.IsDir() {
 		ui.dirPrev = app.nav.loadDir(curr.path)
 	}
-}
-
-func (ui *ui) loadFileInfo(nav *nav) {
-	if !nav.init {
-		return
-	}
-
-	ui.msg = ""
-	ui.msgIsStat = true
-
-	curr, err := nav.currFile()
-	if err != nil {
-		return
-	}
-
-	if curr.err != nil {
-		ui.echoerrf("stat: %s", curr.err)
-		return
-	}
-
-	statfmt := strings.ReplaceAll(gOpts.statfmt, "|", "\x1f")
-	replace := func(s string, val string) {
-		if val == "" {
-			val = "\x00"
-		}
-		statfmt = strings.ReplaceAll(statfmt, s, val)
-	}
-	if nav.isVisualMode() {
-		replace("%m", "VISUAL")
-		replace("%M", "VISUAL")
-	} else {
-		replace("%m", "")
-		replace("%M", "NORMAL")
-	}
-	replace("%p", curr.Mode().String())
-	replace("%c", linkCount(curr))
-	replace("%u", userName(curr))
-	replace("%g", groupName(curr))
-	replace("%s", humanize(uint64(curr.Size())))
-	replace("%S", fmt.Sprintf("%5s", humanize(uint64(curr.Size()))))
-	replace("%t", curr.ModTime().Format(gOpts.timefmt))
-	replace("%l", curr.linkTarget)
-
-	var fileInfo strings.Builder
-	for _, section := range strings.Split(statfmt, "\x1f") {
-		if !strings.Contains(section, "\x00") {
-			fileInfo.WriteString(section)
-		}
-	}
-
-	ui.msg = fileInfo.String()
 }
 
 func (ui *ui) drawPromptLine(nav *nav) {
@@ -925,12 +871,60 @@ func formatRulerOpt(name string, val string) string {
 	return val
 }
 
+func (ui *ui) drawStat(nav *nav) {
+	if ui.msg != "" {
+		ui.msgWin.print(ui.screen, 0, 0, tcell.StyleDefault, ui.msg)
+		return
+	}
+
+	curr, err := nav.currFile()
+	if err != nil {
+		return
+	}
+
+	if curr.err != nil {
+		ui.echoerrf("stat: %s", curr.err)
+		ui.msgWin.print(ui.screen, 0, 0, tcell.StyleDefault, ui.msg)
+		return
+	}
+
+	statfmt := strings.ReplaceAll(gOpts.statfmt, "|", "\x1f")
+	replace := func(s string, val string) {
+		if val == "" {
+			val = "\x00"
+		}
+		statfmt = strings.ReplaceAll(statfmt, s, val)
+	}
+	if nav.isVisualMode() {
+		replace("%m", "VISUAL")
+		replace("%M", "VISUAL")
+	} else {
+		replace("%m", "")
+		replace("%M", "NORMAL")
+	}
+	replace("%p", curr.Mode().String())
+	replace("%c", linkCount(curr))
+	replace("%u", userName(curr))
+	replace("%g", groupName(curr))
+	replace("%s", humanize(uint64(curr.Size())))
+	replace("%S", fmt.Sprintf("%5s", humanize(uint64(curr.Size()))))
+	replace("%t", curr.ModTime().Format(gOpts.timefmt))
+	replace("%l", curr.linkTarget)
+
+	var fileInfo strings.Builder
+	for _, section := range strings.Split(statfmt, "\x1f") {
+		if !strings.Contains(section, "\x00") {
+			fileInfo.WriteString(section)
+		}
+	}
+
+	ui.msgWin.print(ui.screen, 0, 0, tcell.StyleDefault, fileInfo.String())
+}
+
 func (ui *ui) drawRuler(nav *nav) {
 	st := tcell.StyleDefault
 
 	dir := nav.currDir()
-
-	ui.msgWin.print(ui.screen, 0, 0, st, ui.msg)
 
 	tot := len(dir.files)
 	ind := min(dir.ind+1, tot)
@@ -1067,6 +1061,38 @@ func (ui *ui) drawBox() {
 	}
 }
 
+func (ui *ui) drawMenu() {
+	if ui.menu == "" {
+		return
+	}
+
+	lines := strings.Split(ui.menu, "\n")
+	lines = lines[:len(lines)-1]
+
+	ui.menuWin.h = len(lines)
+	ui.menuWin.y = ui.msgWin.y - ui.menuWin.h
+
+	// clear sixel image if it overlaps with the menu
+	ui.screen.LockRegion(ui.menuWin.x, ui.menuWin.y, ui.menuWin.w, ui.menuWin.h, false)
+	ui.sxScreen.forceClear = true
+
+	for i, line := range lines {
+		var st tcell.Style
+		if i == 0 {
+			st = parseEscapeSequence(gOpts.menuheaderfmt)
+		} else {
+			st = parseEscapeSequence(gOpts.menufmt)
+		}
+
+		ui.menuWin.printLine(ui.screen, 0, i, st, line)
+	}
+
+	if ui.menuSelect != nil {
+		st := parseEscapeSequence(gOpts.menuselectfmt)
+		ui.menuWin.print(ui.screen, ui.menuSelect.x, ui.menuSelect.y, st, ui.menuSelect.s)
+	}
+}
+
 func (ui *ui) dirOfWin(nav *nav, wind int) *dir {
 	wins := len(ui.wins)
 	if gOpts.preview {
@@ -1104,6 +1130,7 @@ func (ui *ui) draw(nav *nav) {
 
 	switch ui.cmdPrefix {
 	case "":
+		ui.drawStat(nav)
 		ui.drawRuler(nav)
 		ui.screen.HideCursor()
 	case ">":
@@ -1140,25 +1167,7 @@ func (ui *ui) draw(nav *nav) {
 		ui.drawBox()
 	}
 
-	if ui.menu != "" {
-		lines := strings.Split(ui.menu, "\n")
-
-		lines = lines[:len(lines)-1]
-
-		ui.menuWin.h = len(lines) - 1
-		ui.menuWin.y = ui.wins[0].h - ui.menuWin.h
-
-		if gOpts.drawbox {
-			ui.menuWin.y += 2
-		}
-
-		ui.menuWin.printLine(ui.screen, 0, 0, st.Bold(true), lines[0])
-
-		for i, line := range lines[1:] {
-			ui.menuWin.printLine(ui.screen, 0, i+1, st, "")
-			ui.menuWin.print(ui.screen, 0, i+1, st, line)
-		}
-	}
+	ui.drawMenu()
 
 	ui.screen.Show()
 }
@@ -1572,6 +1581,7 @@ func (ui *ui) readNormalEvent(ev tcell.Event, nav *nav) expr {
 			return &callExpr{"cd", []string{dir.path}, 1}
 		}
 	case *tcell.EventResize:
+		clear(nav.regCache)
 		return &callExpr{"redraw", nil, 1}
 	case *tcell.EventError:
 		log.Printf("Got EventError: '%s' at %s", tev.Error(), tev.When())
@@ -1669,13 +1679,10 @@ func anyKey() {
 	os.Stdin.Read(b)
 }
 
-func listMatches(screen tcell.Screen, matches []compMatch, selectedInd int) string {
-	mlen := len(matches)
-	if mlen < 2 {
-		return ""
+func listMatches(screen tcell.Screen, matches []compMatch, selectedInd int) (string, *menuSelect) {
+	if len(matches) < 2 {
+		return "", nil
 	}
-
-	var b strings.Builder
 
 	wtot, _ := screen.Size()
 	wcol := 0
@@ -1685,21 +1692,23 @@ func listMatches(screen tcell.Screen, matches []compMatch, selectedInd int) stri
 	wcol += gOpts.tabstop - wcol%gOpts.tabstop
 	ncol := max(wtot/wcol, 1)
 
-	b.WriteString("possible matches\n")
+	var b strings.Builder
+	b.WriteString("possible matches")
 
-	for i := 0; i < mlen; {
-		for j := 0; j < ncol && i < mlen; i, j = i+1, j+1 {
-			name := matches[i].name
-			w := runeSliceWidth([]rune(name))
-
-			if i == selectedInd {
-				fmt.Fprintf(&b, "\033[7m%s\033[0m%*s", name, wcol-w, "")
-			} else {
-				fmt.Fprintf(&b, "%s%*s", name, wcol-w, "")
-			}
+	for i, match := range matches {
+		if i%ncol == 0 {
+			b.WriteByte('\n')
 		}
-		b.WriteByte('\n')
+		w := runeSliceWidth([]rune(match.name))
+		fmt.Fprintf(&b, "%s%*s", match.name, wcol-w, "")
 	}
 
-	return b.String()
+	b.WriteByte('\n')
+
+	var selection *menuSelect
+	if selectedInd != -1 {
+		selection = &menuSelect{selectedInd % ncol * wcol, selectedInd/ncol + 1, matches[selectedInd].name}
+	}
+
+	return b.String(), selection
 }

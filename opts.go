@@ -53,7 +53,6 @@ var gOpts struct {
 	cursorparentfmt  string
 	cursorpreviewfmt string
 	cutfmt           string
-	dircache         bool
 	dircounts        bool
 	dirfirst         bool
 	dironly          bool
@@ -76,7 +75,9 @@ var gOpts struct {
 	info             []string
 	infotimefmtnew   string
 	infotimefmtold   string
-	locale           string
+	menufmt          string
+	menuheaderfmt    string
+	menuselectfmt    string
 	mouse            bool
 	number           bool
 	numberfmt        string
@@ -98,7 +99,7 @@ var gOpts struct {
 	shellflag        string
 	shellopts        []string
 	showbinds        bool
-	sixel            bool
+	sizeunits        string
 	smartcase        bool
 	smartdia         bool
 	sortby           sortMethod
@@ -127,7 +128,6 @@ var gLocalOpts struct {
 	dironly   map[string]bool
 	hidden    map[string]bool
 	info      map[string][]string
-	locale    map[string]string
 	reverse   map[string]bool
 	sortby    map[string]sortMethod
 }
@@ -185,15 +185,6 @@ func getInfo(path string) []string {
 	return gOpts.info
 }
 
-func getLocale(path string) string {
-	for _, key := range localOptPaths(path) {
-		if val, ok := gLocalOpts.locale[key]; ok {
-			return val
-		}
-	}
-	return gOpts.locale
-}
-
 func getReverse(path string) bool {
 	for _, key := range localOptPaths(path) {
 		if val, ok := gLocalOpts.reverse[key]; ok {
@@ -222,7 +213,6 @@ func init() {
 	gOpts.cursorparentfmt = "\033[7m"
 	gOpts.cursorpreviewfmt = "\033[4m"
 	gOpts.cutfmt = "\033[7;31m"
-	gOpts.dircache = true
 	gOpts.dircounts = false
 	gOpts.dirfirst = true
 	gOpts.dironly = false
@@ -245,7 +235,9 @@ func init() {
 	gOpts.info = nil
 	gOpts.infotimefmtnew = "Jan _2 15:04"
 	gOpts.infotimefmtold = "Jan _2  2006"
-	gOpts.locale = localeStrDisable
+	gOpts.menufmt = "\033[0m"
+	gOpts.menuheaderfmt = "\033[1m"
+	gOpts.menuselectfmt = "\033[7m"
 	gOpts.mouse = false
 	gOpts.number = false
 	gOpts.numberfmt = "\033[33m"
@@ -267,7 +259,7 @@ func init() {
 	gOpts.shellflag = gDefaultShellFlag
 	gOpts.shellopts = nil
 	gOpts.showbinds = true
-	gOpts.sixel = false
+	gOpts.sizeunits = "binary"
 	gOpts.smartcase = true
 	gOpts.smartdia = false
 	gOpts.sortby = naturalSort
@@ -421,7 +413,6 @@ func init() {
 	gLocalOpts.dironly = make(map[string]bool)
 	gLocalOpts.hidden = make(map[string]bool)
 	gLocalOpts.info = make(map[string][]string)
-	gLocalOpts.locale = make(map[string]string)
 	gLocalOpts.reverse = make(map[string]bool)
 	gLocalOpts.sortby = make(map[string]sortMethod)
 

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"golang.org/x/text/collate"
+	"github.com/gdamore/tcell/v2"
 )
 
 func TestIsRoot(t *testing.T) {
@@ -289,12 +289,59 @@ func TestHumanize(t *testing.T) {
 		{1319413953332, "1.2T"},       // 1.2 TiB
 		{1463669878895412, "1.3P"},    // 1.3 PiB
 		{7955158381787244544, "6.9E"}, // 6.9 EiB
-		{math.MaxUint64, "16.0E"},     // 16 EiB
+		{math.MaxInt64, "8.0E"},       // 8 EiB
 	}
 
+	gOpts.sizeunits = "binary"
 	for _, test := range tests {
 		if got := humanize(test.size); got != test.expected {
-			t.Errorf("at input '%d' expected '%s' but got '%s'", test.size, test.expected, got)
+			t.Errorf("at input ('%d', '%s') expected '%s' but got '%s'", test.size, gOpts.sizeunits, test.expected, got)
+		}
+	}
+
+	tests = []struct {
+		size     uint64
+		expected string
+	}{
+		{0, "0B"},
+		{1, "1B"},
+		{2, "2B"},
+		{10, "10B"},
+		{100, "100B"},
+		{999, "999B"},
+		{1000, "1.0K"},
+		{1001, "1.0K"},
+		{1049, "1.0K"},
+		{1050, "1.1K"},
+		{1051, "1.1K"},
+		{9949, "9.9K"},
+		{9950, "10.0K"},
+		{9951, "10.0K"},
+		{9999, "10.0K"},
+		{10000, "10.0K"},
+		{10001, "10.0K"},
+		{99949, "99.9K"},
+		{99950, "100K"},
+		{99951, "100K"},
+		{999499, "999K"},
+		{999500, "1.0M"},
+		{999501, "1.0M"},
+		{999999, "1.0M"},
+		{1000000, "1.0M"},
+		{1000001, "1.0M"},
+		{999499999, "999M"},
+		{999500000, "1.0G"},
+		{999500001, "1.0G"},
+		{999999999, "1.0G"},
+		{1000000000, "1.0G"},
+		{1000000001, "1.0G"},
+		{math.MaxInt64, "9.2E"},
+	}
+
+	gOpts.sizeunits = "decimal"
+	for _, test := range tests {
+		if got := humanize(test.size); got != test.expected {
+			t.Errorf("at input ('%d', '%s') expected '%s' but got '%s'", test.size, gOpts.sizeunits, test.expected, got)
 		}
 	}
 }
@@ -363,51 +410,34 @@ func TestGetFileExtension(t *testing.T) {
 	}
 }
 
-func TestLocaleNaturalLess(t *testing.T) {
+func TestOptionToFmtstr(t *testing.T) {
 	tests := []struct {
-		s1  string
-		s2  string
-		exp bool
+		s   string
+		exp string
 	}{
-		// preserving behavior of `naturalLess`
-		{"foo", "bar", false},
-		{"bar", "baz", true},
-		{"foo", "123", false},
-		{"foo1", "foobar", true},
-		{"foo1", "foo10", true},
-		{"foo2", "foo10", true},
-		{"foo1", "foo10bar", true},
-		{"foo2", "foo10bar", true},
-		{"foo1bar", "foo10bar", true},
-		{"foo2bar", "foo10bar", true},
-		{"foo1bar", "foo10", true},
-		{"foo2bar", "foo10", true},
-
-		// locale sort
-		{"你好", "他好", true},     // \u4F60\u597D, \u4ED6\u597D
-		{"到这", "到那", false},    // \u5230\u8FD9, \u5230\u90A3
-		{"你说", "什么", true},     // \u4f60\u8bf4, \u4ec0\u4e48
-		{"你好", "World", false}, // \u4F60\u597D, \u57\u6f\u72\u6c\u64
-		{"甲1", "甲乙", true},
-		{"甲1", "甲10", true},
-		{"甲2", "甲10", true},
-		{"甲1", "甲10乙", true},
-		{"甲2", "甲10乙", true},
-		{"甲1乙", "甲10乙", true},
-		{"甲2乙", "甲10乙", true},
-		{"甲1乙", "甲10", true},
-		{"甲2乙", "甲10", true},
-	}
-
-	localeStr := "zh-CN"
-	collator, err := makeCollator(localeStr, collate.Numeric)
-	if err != nil {
-		t.Fatalf("failed to create collator for %q: %s", localeStr, err)
+		{"\033[1m", "\033[1m%s\033[0m"},
+		{"\033[1;7;31;42m", "\033[1;7;31;42m%s\033[0m"},
 	}
 
 	for _, test := range tests {
-		if got := collator.CompareString(test.s1, test.s2) < 0; got != test.exp {
-			t.Errorf("at input '%s' and '%s' expected '%t' but got '%t'", test.s1, test.s2, test.exp, got)
+		if got := optionToFmtstr(test.s); got != test.exp {
+			t.Errorf("at input %q expected %q but got %q", test.s, test.exp, got)
+		}
+	}
+}
+
+func TestParseEscapeSequence(t *testing.T) {
+	tests := []struct {
+		s   string
+		exp tcell.Style
+	}{
+		{"\033[1m", tcell.StyleDefault.Bold(true)},
+		{"\033[1;7;31;42m", tcell.StyleDefault.Bold(true).Reverse(true).Foreground(tcell.ColorMaroon).Background(tcell.ColorGreen)},
+	}
+
+	for _, test := range tests {
+		if got := parseEscapeSequence(test.s); got != test.exp {
+			t.Errorf("at input %q expected '%v' but got '%v'", test.s, test.exp, got)
 		}
 	}
 }
@@ -440,6 +470,58 @@ func TestStripAnsi(t *testing.T) {
 		// to avoid misalignment
 		if printLength(test.s) != len(stripAnsi(test.s)) {
 			t.Errorf("at input %q expected '%d' but got '%d'", test.s, printLength(test.s), len(stripAnsi(test.s)))
+		}
+	}
+}
+
+func TestReadLines(t *testing.T) {
+	tests := []struct {
+		s        string
+		maxLines int
+		lines    []string
+		binary   bool
+		sixel    bool
+	}{
+		{"", 10, nil, false, false},
+		{"\r", 10, nil, false, false},
+		{"\r\n", 10, []string{""}, false, false},
+		{"\r\r\n", 10, []string{""}, false, false},
+		{"\n\n", 10, []string{"", ""}, false, false},
+		{"foo", 10, []string{"foo"}, false, false},
+		{"foo\n", 10, []string{"foo"}, false, false},
+		{"foo\r\n", 10, []string{"foo"}, false, false},
+		{"foo\nbar", 10, []string{"foo", "bar"}, false, false},
+		{"foo\nbar\n", 10, []string{"foo", "bar"}, false, false},
+		{"foo\r\nbar", 10, []string{"foo", "bar"}, false, false},
+		{"foo\r\nbar\r\n", 10, []string{"foo", "bar"}, false, false},
+		{"\033[31mfoo\033[0m", 10, []string{"\033[31mfoo\033[0m"}, false, false},
+		{"\000", 10, nil, true, false},
+		{"foo\r\n\000\r\nbar\r\n", 10, nil, true, false},
+		{"\033P\033\\", 10, []string{"\033P\033\\"}, false, true},
+		{"\033Pq\"1;1;1;1#0@\033\\", 10, []string{"\033Pq\"1;1;1;1#0@\033\\"}, false, true},
+		{"\033P\000\033\\", 10, []string{"\033P\000\033\\"}, false, true},
+		{"\033P\n\033\\", 10, []string{"\033P\n\033\\"}, false, true},
+		{"\033P\r\n\033\\", 10, []string{"\033P\r\n\033\\"}, false, true},
+		{"\033P\033\\\033P\033\\", 10, []string{"\033P\033\\", "\033P\033\\"}, false, true},
+		{"foo\033P\033\\bar", 10, []string{"foo", "\033P\033\\", "bar"}, false, true},
+		{"foo\033P\033\\bar\033P\033\\baz", 10, []string{"foo", "\033P\033\\", "bar", "\033P\033\\", "baz"}, false, true},
+		{"foo\nbar\nbaz", 2, []string{"foo", "bar"}, false, false},
+		{"foo\nbar\nbaz\n", 2, []string{"foo", "bar"}, false, false},
+		{"foo\nbar\033P\033\\", 2, []string{"foo", "bar"}, false, false},
+		{"foo\nbar\nbaz", 3, []string{"foo", "bar", "baz"}, false, false},
+		{"foo\nbar\nbaz\n", 3, []string{"foo", "bar", "baz"}, false, false},
+		{"foo\nbar\033P\033\\", 3, []string{"foo", "bar", "\033P\033\\"}, false, true},
+	}
+
+	for _, test := range tests {
+		lines, binary, sixel := readLines(strings.NewReader(test.s), test.maxLines)
+		if !reflect.DeepEqual(lines, test.lines) || binary != test.binary || sixel != test.sixel {
+			t.Errorf(
+				"at input (%q, %v) expected (%#v, %v, %v) but got (%#v, %v, %v)",
+				test.s, test.maxLines,
+				test.lines, test.binary, test.sixel,
+				lines, binary, sixel,
+			)
 		}
 	}
 }

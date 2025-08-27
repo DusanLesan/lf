@@ -155,7 +155,6 @@ The following options can be used to customize the behavior of lf:
 	cursorparentfmt   string    (default "\033[7m")
 	cursorpreviewfmt  string    (default "\033[4m")
 	cutfmt            string    (default "\033[7;31m")
-	dircache          bool      (default true)
 	dircounts         bool      (default false)
 	dirfirst          bool      (default true)
 	dironly           bool      (default false)
@@ -178,7 +177,9 @@ The following options can be used to customize the behavior of lf:
 	info              []string  (default '')
 	infotimefmtnew    string    (default 'Jan _2 15:04')
 	infotimefmtold    string    (default 'Jan _2  2006')
-	locale            string    (default '')
+	menufmt           string    (default "\033[0m")
+	menuheaderfmt     string    (default "\033[1m")
+	menuselectfmt     string    (default "\033[7m")
 	mouse             bool      (default false)
 	number            bool      (default false)
 	numberfmt         string    (default "\033[33m")
@@ -200,7 +201,7 @@ The following options can be used to customize the behavior of lf:
 	shellflag         string    (default '-c' for Unix and '/c' for Windows)
 	shellopts         []string  (default '')
 	showbinds         bool      (default true)
-	sixel             bool      (default false)
+	sizeunits         string    (default 'binary')
 	smartcase         bool      (default true)
 	smartdia          bool      (default false)
 	sortby            string    (default 'natural')
@@ -368,9 +369,11 @@ You can configure these locations with the following variables given with their 
 
 	Windows
 	    %LF_CONFIG_HOME%
+	    %XDG_CONFIG_HOME%
 	    %APPDATA%
 
 	    %LF_DATA_HOME%
+	    %XDG_DATA_HOME%
 	    %LOCALAPPDATA%
 
 A sample configuration file can be found at
@@ -755,10 +758,6 @@ For example, `\033[4m%s\033[0m` has the same effect as `\033[4m`.
 
 Format string of the indicator for files to be cut.
 
-## dircache (bool) (default true)
-
-Cache directory contents.
-
 ## dircounts (bool) (default false)
 
 When this option is enabled, directory sizes show the number of items inside instead of the total size of the directory, which needs to be calculated for each directory using `calcdirsize`.
@@ -872,11 +871,17 @@ Format string of the file time shown in the info column when it matches this yea
 
 Format string of the file time shown in the info column when it doesn't match this year.
 
-## locale (string) (default ``)
+## menufmt (string) (default `\033[0m`)
 
-An IETF BCP 47 language tag (e.g. `zh-CN`) for specifying the locale used when using sort type `natural` and `name`.
-An empty string means disable locale ordering, and the special value `*` is used to indicate reading the locale setting from the system environment.
-This feature is currently experimental.
+Format string of the menu.
+
+## menuheaderfmt (string) (default `\033[1m`)
+
+Format string of the header row in the menu.
+
+## menuselectfmt (string) (default `\033[7m`)
+
+Format string of the currently selected item in the menu.
 
 ## mouse (bool) (default false)
 
@@ -994,9 +999,9 @@ List of shell options to pass to the shell executable.
 
 Show bindings associated with pressed keys.
 
-## sixel (bool) (default false)
+## sizeunits (string) (default `binary`)
 
-Render sixel images in preview.
+Determines whether file sizes are displayed using binary units (`1K` is 1024 bytes) or decimal units (`1K` is 1000 bytes).
 
 ## smartcase (bool) (default true)
 
@@ -1031,8 +1036,6 @@ Format string of the file info shown in the bottom left corner.
 Special expansions are provided, `%p` as the file permissions, `%c` as the link count, `%u` as the user, `%g` as the group, `%s` as the file size, `%S` as the file size but with a fixed width of five characters (left-padded with spaces), `%t` as the last modified time, `%l` as the link target, `%m` as the current mode and `%M` as the current mode but also shown in Normal mode (displaying `NORMAL` instead of a blank string).
 
 The `|` character splits the format string into sections. Any section containing a failed expansion (result is a blank string) is discarded and not shown.
-
-File size is formatted using first letter of IEC 80000-13:2025 prefixes for binary multiples (i.e. 1024 bytes is `1.0K`).
 
 ## tabstop (int) (default 8)
 
@@ -1282,7 +1285,7 @@ Command `set` is used to set an option which can be a boolean, integer, or strin
 	set sortby "time"  # string value with double quotes (backslash escapes)
 
 Command `setlocal` is used to set a local option for a directory which can be a boolean or string.
-Currently supported local options are `dircounts`, `dirfirst`, `dironly`, `hidden`, `info`, `locale`, `reverse` and `sortby`.
+Currently supported local options are `dircounts`, `dirfirst`, `dironly`, `hidden`, `info`, `reverse` and `sortby`.
 Adding a trailing path separator (i.e. `/` for Unix and `\` for Windows) sets the option for the given directory along with its subdirectories:
 
 	setlocal /foo/bar hidden         # boolean enable
